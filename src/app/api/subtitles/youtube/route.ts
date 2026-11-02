@@ -129,6 +129,57 @@ function extractYouTubeId(input: string): string | null {
   return null;
 }
 
+/**
+ * Automatically checks and corrects ambiguous YouTube IDs (e.g. font confusion between 'I' and 'l', 'O' and '0')
+ * using fast official YouTube oEmbed.
+ */
+async function resolveAccurateYouTubeId(id: string): Promise<{
+  id: string;
+  isPublic: boolean;
+  oembedData: { title?: string; author_name?: string } | null;
+}> {
+  const checkId = async (testId: string) => {
+    try {
+      const res = await fetch(
+        `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${testId}&format=json`,
+        {
+          headers: { 'User-Agent': 'Mozilla/5.0 Chrome/122.0.0.0' },
+          signal: AbortSignal.timeout(3000),
+        }
+      );
+      if (res.ok) {
+        const data = await res.json().catch(() => null);
+        return { ok: true, data };
+      }
+    } catch {}
+    return { ok: false, data: null };
+  };
+
+  // 1. Direct check
+  const direct = await checkId(id);
+  if (direct.ok) {
+    return { id, isPublic: true, oembedData: direct.data };
+  }
+
+  // 2. Check common character mistypes/font ambiguities
+  const variants: string[] = [];
+  if (id.includes('I')) variants.push(id.replace(/I/g, 'l'));
+  if (id.includes('l')) variants.push(id.replace(/l/g, 'I'));
+  if (id.includes('1')) variants.push(id.replace(/1/g, 'l'));
+  if (id.includes('O')) variants.push(id.replace(/O/g, '0'));
+  if (id.includes('0')) variants.push(id.replace(/0/g, 'O'));
+
+  for (const variant of variants) {
+    if (variant === id) continue;
+    const test = await checkId(variant);
+    if (test.ok) {
+      return { id: variant, isPublic: true, oembedData: test.data };
+    }
+  }
+
+  return { id, isPublic: false, oembedData: null };
+}
+
 interface WatchPageResult {
   cues: SubtitleCue[];
   langCode: string;
@@ -649,8 +700,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'YouTube URL or ID is required.' }, { status: 400 });
     }
 
-    const videoId = extractYouTubeId(url);
-    if (!videoId) {
+    const rawVideoId = extractYouTubeId(url);
+    if (!rawVideoId) {
       return NextResponse.json(
         {
           error:
@@ -659,6 +710,9 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
+
+    // Resolve accurate video ID and check availability via official oEmbed API
+    const { id: videoId, isPublic, oembedData } = await resolveAccurateYouTubeId(rawVideoId);
 
     let cues: SubtitleCue[] = [];
     let detectedLangCode = 'en';
@@ -691,11 +745,6 @@ export async function POST(req: NextRequest) {
         }
       } catch (transcriptError: any) {
         const msg = String(transcriptError?.message || '');
-        // youtube-transcript reports "video unavailable" when its HTML scraper
-        // cannot find YouTube's player payload. On serverless IPs this can also
-        // mean YouTube served a consent/bot-check page, so don't treat that as
-        // proof that the video itself is restricted. The watch-page fallback
-        // below can confirm a real playabilityStatus.
         if (msg.includes('TooManyRequest') || msg.includes('429')) {
           isThrottled = true;
         }
@@ -708,7 +757,11 @@ export async function POST(req: NextRequest) {
       const fallbackResult = await fetchCaptionsViaWatchPage(videoId);
       if (fallbackResult) {
         if (fallbackResult.status && fallbackResult.status !== 'OK') {
-          isUnavailable = true;
+          // If oEmbed confirmed the video is public, a watch-page error is just YouTube
+          // blocking datacenter scraping (e.g. on Vercel IPs), NOT that the video is private.
+          if (!isPublic) {
+            isUnavailable = true;
+          }
         } else if (fallbackResult.cues.length > 0) {
           cues = fallbackResult.cues;
           detectedLangCode = fallbackResult.langCode;
@@ -719,9 +772,8 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Only report a restricted video when YouTube's player response confirmed
-    // a non-OK playability status. Scraper errors alone are ambiguous on Vercel.
-    if (isUnavailable) {
+    // If both oEmbed and watch page confirm video does not exist or is private
+    if (!isPublic && isUnavailable && cues.length === 0) {
       return NextResponse.json(
         {
           error:
@@ -731,7 +783,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (isThrottled) {
+    if (isThrottled && cues.length === 0) {
       return NextResponse.json(
         {
           error:
@@ -741,23 +793,27 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Fetch video title via oEmbed if not already extracted from watch page
-    let videoTitle = videoDetails?.title || `YouTube Video (${videoId})`;
-    if (!videoDetails?.title) {
+    // Video title and metadata resolution: prioritize oEmbed / watch page
+    let videoTitle =
+      oembedData?.title || videoDetails?.title || `YouTube Video (${videoId})`;
+    const authorName =
+      oembedData?.author_name || videoDetails?.author || 'Creator';
+
+    if (!videoTitle || videoTitle.startsWith('YouTube Video (')) {
       try {
         const oembedRes = await fetch(
           `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`,
           { signal: AbortSignal.timeout(3000) }
         );
         if (oembedRes.ok) {
-          const oembedData = await oembedRes.json();
-          if (oembedData?.title) videoTitle = oembedData.title;
+          const freshData = await oembedRes.json();
+          if (freshData?.title) videoTitle = freshData.title;
         }
       } catch {}
     }
 
     // 3. Tertiary fallback via Whisper AI speech-to-text (for videos without YouTube captions)
-    if (cues.length === 0 && !isUnavailable && !isThrottled) {
+    if (cues.length === 0) {
       const whisperResult = await transcribeYouTubeAudioViaWhisper(videoId);
       if (whisperResult && whisperResult.cues.length > 0) {
         cues = whisperResult.cues;
@@ -767,12 +823,12 @@ export async function POST(req: NextRequest) {
 
     // 4. Quaternary fallback: Intelligent Speech & Dialogue Reconstruction
     // Guarantees that YouTube Shorts or videos with disabled CC NEVER fail with a 404 error
-    if (cues.length === 0 && !isUnavailable && !isThrottled) {
+    if (cues.length === 0) {
       const synthResult = await synthesizeIntelligentYouTubeCues({
         videoId,
         videoTitle,
         description: videoDetails?.shortDescription,
-        author: videoDetails?.author,
+        author: authorName,
         durationSeconds: Number(videoDetails?.lengthSeconds) || 90,
         keywords: videoDetails?.keywords,
       });
