@@ -8,7 +8,6 @@ import { extractSections } from '@/lib/markdown';
 import { formatDate } from '@/lib/utils';
 import type { Summary } from '@/lib/types';
 
-/** Interview questions module — questions only, with PDF download. */
 export default async function InterviewPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const profile = await requireUser();
@@ -26,16 +25,18 @@ export default async function InterviewPage({ params }: { params: Promise<{ id: 
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex items-start gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-4 rounded-3xl border border-slate-200/80 bg-white/80 p-6 shadow-sm backdrop-blur dark:border-slate-800 dark:bg-slate-900/80">
+        <div className="flex items-start gap-4">
           <BackButton />
           <div>
-            <p className="text-sm font-medium uppercase tracking-wide text-brand-600 dark:text-brand-100">
-              Interview questions
+            <p className="text-xs font-bold uppercase tracking-wider text-cyan-600 dark:text-cyan-400">
+              Technical Interview Preparation
             </p>
-            <h1 className="mt-1 text-2xl font-bold sm:text-3xl">{summary.topic}</h1>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-              {formatDate(summary.created_at)}
+            <h1 className="mt-1 text-2xl font-black tracking-tight sm:text-3xl text-slate-900 dark:text-white">
+              {summary.topic}
+            </h1>
+            <p className="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400">
+              High-frequency interview questions &bull; {formatDate(summary.created_at)}
             </p>
           </div>
         </div>
@@ -46,7 +47,7 @@ export default async function InterviewPage({ params }: { params: Promise<{ id: 
             userName={profile.name ?? profile.email}
             searchDate={formatDate(summary.created_at)}
             markdown={interview}
-            heading="Interview Questions"
+            heading="SynapseTube — Interview Questions"
             label="Download PDF"
             fileSuffix="interview-questions"
           />
@@ -56,8 +57,8 @@ export default async function InterviewPage({ params }: { params: Promise<{ id: 
       {interview ? (
         <NotesPanel markdown={interview} />
       ) : (
-        <p className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-slate-400 dark:border-slate-700 dark:bg-slate-800">
-          This study document has no interview questions section.
+        <p className="rounded-3xl border border-slate-200/80 bg-white/80 p-8 text-center text-sm font-medium text-slate-400 dark:border-slate-800 dark:bg-slate-900/80">
+          This study document does not contain an interview questions section.
         </p>
       )}
     </div>

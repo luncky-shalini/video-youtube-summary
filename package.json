@@ -1,5 +1,5 @@
 {
-  "name": "ai-learning-platform",
+  "name": "synapse-tube",
   "version": "1.0.0",
   "private": true,
   "scripts": {
@@ -12,6 +12,7 @@
   "dependencies": {
     "@supabase/ssr": "^0.6.1",
     "@supabase/supabase-js": "^2.47.10",
+    "html2canvas": "^1.4.1",
     "jspdf": "^2.5.2",
     "lucide-react": "^0.469.0",
     "next": "^15.1.4",
@@ -22,6 +23,7 @@
     "react-markdown": "^9.0.3",
     "recharts": "^2.15.0",
     "remark-gfm": "^4.0.0",
+    "undici": "^8.12.3",
     "youtube-transcript": "^1.2.1"
   },
   "devDependencies": {

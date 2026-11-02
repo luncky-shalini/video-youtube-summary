@@ -2,27 +2,25 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import {
   ArrowRight,
+  Award,
   Bot,
-  Check,
+  CheckCircle2,
   Clock,
-  Coins,
+  Compass,
   FileDown,
   FileText,
-  Github,
-  Globe,
-  GraduationCap,
-  History,
-  LayoutDashboard,
-  Linkedin,
-  ListOrdered,
+  Languages,
+  Layers,
+  ListChecks,
   Mail,
-  NotebookText,
+  MessageSquareText,
   Play,
   ShieldCheck,
   Sparkles,
   Star,
-  Twitter,
+  Upload,
   Users,
+  Wand2,
   Youtube,
 } from 'lucide-react';
 import { ThemeToggle } from '@/components/ThemeToggle';
@@ -32,66 +30,48 @@ import {
   QuizIllustration,
   SynthesisIllustration,
 } from '@/components/BlogIllustrations';
+
 const NAV_LINKS = [
   { href: '#top', label: 'Home' },
-  { href: '#about', label: 'About Us' },
+  { href: '#how-it-works', label: 'Workflow' },
   { href: '#features', label: 'Features' },
-  { href: '#blog', label: 'Blog' },
+  { href: '#insights', label: 'Insights' },
   { href: '#contact', label: 'Contact' },
 ];
-
-const WAVE_HEIGHTS = [
-  8, 14, 10, 18, 12, 22, 16, 9, 20, 13, 24, 11, 17, 8, 21, 15, 10, 19, 12, 23,
-  14, 9, 18, 11, 22, 13, 16, 8, 20, 12, 24, 10, 17, 14, 9, 21, 15, 19, 11, 23,
-];
-
-function Card({ className = '', children }: { className?: string; children: React.ReactNode }) {
-  return (
-    <div
-      className={`rounded-2xl border border-white/60 bg-white/90 p-5 shadow-sm backdrop-blur dark:border-slate-700 dark:bg-slate-800/90 ${className}`}
-    >
-      {children}
-    </div>
-  );
-}
 
 export default async function LandingPage({
   searchParams,
 }: {
   searchParams: Promise<{ code?: string }>;
 }) {
-  // Safety net: if an OAuth code ever lands on the homepage (misconfigured
-  // Site URL fallback), forward it to the callback so login still completes.
   const { code } = await searchParams;
   if (code) redirect(`/auth/callback?code=${encodeURIComponent(code)}`);
 
-  // The landing page is always the entry point. "Sign In" leads to the
-  // existing Google sign-in page.
-  const appHref = '/login';
-
   return (
-    <div id="top" className="min-h-screen bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+    <div id="top" className="min-h-screen bg-slate-50/70 text-slate-900 selection:bg-teal-500/20 selection:text-teal-900 dark:bg-[#0b0f19] dark:text-slate-100 dark:selection:bg-teal-500/30">
       {/* ── Navbar ─────────────────────────────────────────────────────── */}
-      <header className="sticky top-0 z-50 border-b border-slate-100 bg-white/85 backdrop-blur dark:border-slate-800 dark:bg-slate-950/85">
+      <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-white/80 backdrop-blur-md dark:border-slate-800/80 dark:bg-[#0b0f19]/80">
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6">
-          <Link href="#top" className="flex items-center gap-2">
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 text-white">
-              <Play className="h-4 w-4 fill-current" />
-            </span>
-            <span className="text-sm font-extrabold tracking-wide sm:text-base">
-              YOUTUBE <span className="text-indigo-600 dark:text-indigo-400">SUMMARY</span>
+          <Link href="#top" className="flex items-center gap-2.5 group">
+            <div className="relative flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-teal-500 via-cyan-500 to-emerald-400 p-0.5 shadow-glow-sm transition-transform duration-300 group-hover:scale-105">
+              <div className="flex h-full w-full items-center justify-center rounded-[10px] bg-slate-950 text-white">
+                <Sparkles className="h-4 w-4 text-cyan-400" />
+              </div>
+            </div>
+            <span className="text-base font-black tracking-tight sm:text-lg">
+              Synapse<span className="bg-gradient-to-r from-teal-500 to-cyan-500 bg-clip-text text-transparent">Tube</span>
             </span>
           </Link>
 
-          <nav className="hidden items-center gap-1 lg:flex">
+          <nav className="hidden items-center gap-1 lg:flex rounded-full border border-slate-200/60 bg-slate-100/60 p-1 dark:border-slate-800/70 dark:bg-slate-900/60">
             {NAV_LINKS.map((l, i) => (
               <a
                 key={l.href}
                 href={l.href}
-                className={`rounded-lg px-3 py-2 text-sm font-medium transition ${
+                className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${
                   i === 0
-                    ? 'text-indigo-600 dark:text-indigo-400'
-                    : 'text-slate-600 hover:text-indigo-600 dark:text-slate-300 dark:hover:text-indigo-400'
+                    ? 'bg-white text-teal-700 shadow-xs dark:bg-slate-800 dark:text-teal-300'
+                    : 'text-slate-600 hover:text-teal-600 dark:text-slate-400 dark:hover:text-teal-300'
                 }`}
               >
                 {l.label}
@@ -99,238 +79,58 @@ export default async function LandingPage({
             ))}
           </nav>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 sm:gap-3">
             <ThemeToggle />
             <Link
-              href={appHref}
-              className="rounded-full bg-gradient-to-r from-indigo-600 to-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-md transition hover:opacity-90 sm:px-5"
+              href="/login"
+              className="group relative flex items-center gap-1.5 overflow-hidden rounded-full bg-gradient-to-r from-teal-600 to-cyan-600 px-5 py-2 text-xs sm:text-sm font-bold text-white shadow-sm transition hover:from-teal-500 hover:to-cyan-500 hover:shadow-glow-sm"
             >
-              Sign In
+              <span>Started Here &rarr;</span>
             </Link>
           </div>
         </div>
       </header>
 
-      {/* ── Hero ───────────────────────────────────────────────────────── */}
-      <section className="mx-auto max-w-7xl px-4 pt-6 sm:px-6">
-        <div className="rounded-3xl bg-gradient-to-br from-indigo-50 via-white to-fuchsia-50 p-6 dark:from-slate-900 dark:via-slate-950 dark:to-slate-900 sm:p-10 lg:p-14">
-          <div className="grid items-center gap-12 lg:grid-cols-2">
-            {/* Left */}
-            <div>
-              <span className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-1.5 text-sm font-medium text-indigo-700 shadow-sm dark:bg-slate-800 dark:text-indigo-300">
-                <Users className="h-4 w-4" /> Trusted by 10K+ Learners
+      {/* ── Hero & Introduction ────────────────────────────────────────── */}
+      <section className="relative mx-auto max-w-7xl px-4 pt-8 sm:px-6 lg:pt-12">
+        {/* Ambient lighting */}
+        <div className="pointer-events-none absolute left-1/2 -top-24 h-96 w-96 -translate-x-1/2 rounded-full bg-teal-500/15 blur-3xl" />
+        <div className="pointer-events-none absolute right-10 top-1/3 h-72 w-72 rounded-full bg-cyan-500/10 blur-3xl" />
+
+        <div className="relative rounded-3xl border border-slate-200/80 bg-white/80 p-6 shadow-sm backdrop-blur-md dark:border-slate-800/80 dark:bg-slate-900/50 sm:p-10 lg:p-12">
+          {/* Hero Header */}
+          <div className="mx-auto max-w-3xl text-center">
+            <div className="inline-flex items-center gap-2 rounded-full border border-teal-500/30 bg-teal-50/70 px-3.5 py-1 text-xs font-bold text-teal-700 backdrop-blur dark:bg-teal-950/40 dark:text-teal-300">
+              <Sparkles className="h-3.5 w-3.5 text-teal-500" />
+              <span>Autonomous Video Transcription & Multilingual Translation</span>
+            </div>
+
+            <h1 className="mt-5 text-3xl font-black leading-[1.12] tracking-tight sm:text-4xl lg:text-5xl text-slate-900 dark:text-white">
+              Video Upload, Subtitles &{' '}
+              <span className="bg-gradient-to-r from-teal-500 via-cyan-500 to-emerald-400 bg-clip-text text-transparent">
+                Instant AI Translation
               </span>
+            </h1>
 
-              <h1 className="mt-6 text-5xl font-black leading-[1.05] tracking-tight sm:text-6xl lg:text-7xl">
-                YOUTUBE
-                <br />
-                <span className="bg-gradient-to-r from-indigo-600 to-violet-600 bg-clip-text text-transparent">
-                  SUMMARY
-                </span>
-              </h1>
-
-              <p className="mt-5 text-lg font-semibold text-slate-700 dark:text-slate-200">
-                Learn Smarter. Save Time. Get Key Insights Instantly.
-              </p>
-              <p className="mt-3 max-w-md text-slate-500 dark:text-slate-400">
-                Search any topic and get the best 10 YouTube videos, AI-powered summaries, notes,
-                quizzes, and interview questions – all in one place.
-              </p>
-
-              <div className="mt-8 grid max-w-lg grid-cols-2 gap-6 sm:grid-cols-4">
-                {[
-                  { icon: Youtube, color: 'bg-red-50 text-red-500 dark:bg-red-900/30', label: 'Top 10 Videos from YouTube' },
-                  { icon: Sparkles, color: 'bg-violet-50 text-violet-500 dark:bg-violet-900/30', label: 'AI Powered Summaries' },
-                  { icon: FileDown, color: 'bg-blue-50 text-blue-500 dark:bg-blue-900/30', label: 'Export Notes as PDF' },
-                  { icon: ShieldCheck, color: 'bg-green-50 text-green-500 dark:bg-green-900/30', label: 'Secure & Private' },
-                ].map((f) => (
-                  <div key={f.label} className="flex flex-col items-center gap-2 text-center">
-                    <span className={`flex h-12 w-12 items-center justify-center rounded-2xl ${f.color}`}>
-                      <f.icon className="h-6 w-6" />
-                    </span>
-                    <span className="text-xs font-medium text-slate-600 dark:text-slate-300">{f.label}</span>
-                  </div>
-                ))}
-              </div>
-
-              <div className="mt-8 flex flex-wrap items-center gap-3">
-                <Link
-                  href={appHref}
-                  className="flex items-center gap-2 rounded-full bg-gradient-to-r from-indigo-600 to-violet-600 px-6 py-3 font-semibold text-white shadow-lg transition hover:opacity-90"
-                >
-                  Sign In <ArrowRight className="h-4 w-4" />
-                </Link>
-                <a
-                  href="#features"
-                  className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-6 py-3 font-semibold text-slate-700 transition hover:border-indigo-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                >
-                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-900 text-white dark:bg-white dark:text-slate-900">
-                    <Play className="h-3 w-3 fill-current" />
-                  </span>
-                  Learn More
-                </a>
-              </div>
-
-              <p className="mt-4 flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
-                <Check className="h-4 w-4 text-green-500" />
-                No credit card required &bull; Free forever plan available
-              </p>
-            </div>
-
-            {/* Right — feature card mosaic */}
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-4">
-                <Card>
-                  <div className="flex items-center gap-3">
-                    <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-violet-100 text-violet-600 dark:bg-violet-900/40 dark:text-violet-300">
-                      <Bot className="h-6 w-6" />
-                    </span>
-                    <p className="font-semibold">AI Summarizer</p>
-                  </div>
-                  <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                    Get concise, accurate summaries powered by advanced AI.
-                  </p>
-                  <div className="mt-3 flex items-center gap-2">
-                    <div className="flex -space-x-2">
-                      {['bg-amber-400', 'bg-rose-400', 'bg-sky-400'].map((c) => (
-                        <span key={c} className={`h-7 w-7 rounded-full border-2 border-white ${c} dark:border-slate-800`} />
-                      ))}
-                      <span className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-slate-900 text-xs font-bold text-white dark:border-slate-800">
-                        +
-                      </span>
-                    </div>
-                    <span className="text-xs text-slate-400">20K+ Users</span>
-                  </div>
-                </Card>
-
-                <Card>
-                  <div className="flex items-center gap-3">
-                    <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-300">
-                      <NotebookText className="h-6 w-6" />
-                    </span>
-                    <p className="font-semibold">Smart Notes</p>
-                  </div>
-                  <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                    Well-structured notes to help you learn and revise quickly.
-                  </p>
-                  <div className="mt-3 flex gap-2">
-                    {[
-                      'bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-300',
-                      'bg-violet-100 text-violet-600 dark:bg-violet-900/40 dark:text-violet-300',
-                      'bg-rose-100 text-rose-600 dark:bg-rose-900/40 dark:text-rose-300',
-                    ].map((c, i) => (
-                      <span key={i} className={`flex h-9 w-9 items-center justify-center rounded-xl ${c}`}>
-                        <FileText className="h-4 w-4" />
-                      </span>
-                    ))}
-                  </div>
-                </Card>
-
-                <Card>
-                  <div className="flex items-center gap-3">
-                    <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-100 text-emerald-600 dark:bg-emerald-900/40 dark:text-emerald-300">
-                      <ListOrdered className="h-6 w-6" />
-                    </span>
-                    <p className="font-semibold">Auto Chaptering</p>
-                  </div>
-                  <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                    AI detects key chapters and organizes content automatically.
-                  </p>
-                  <div className="mt-3 flex items-center gap-2">
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-violet-100 text-violet-600 dark:bg-violet-900/40 dark:text-violet-300">
-                      <Play className="h-3.5 w-3.5 fill-current" />
-                    </span>
-                    <div className="flex h-8 flex-1 items-center gap-[3px] overflow-hidden">
-                      {WAVE_HEIGHTS.map((h, i) => (
-                        <span
-                          key={i}
-                          className="w-[3px] shrink-0 rounded-full bg-violet-400/80"
-                          style={{ height: `${h}px` }}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                </Card>
-              </div>
-
-              <div className="space-y-4">
-                <Card className="overflow-hidden p-0">
-                  <div className="relative aspect-video bg-gradient-to-br from-indigo-500 via-purple-500 to-slate-800">
-                    <span className="absolute left-3 top-3 flex h-8 w-8 items-center justify-center rounded-lg bg-red-600 text-white">
-                      <Play className="h-4 w-4 fill-current" />
-                    </span>
-                    <span className="absolute right-3 top-3 rounded-md bg-slate-900/80 px-2 py-1 text-[10px] font-bold text-white">
-                      TOP 10 VIDEOS
-                    </span>
-                    <span className="absolute left-1/2 top-1/2 flex h-14 w-14 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-slate-900/70 text-white backdrop-blur">
-                      <Play className="h-6 w-6 fill-current" />
-                    </span>
-                  </div>
-                  <div className="p-4">
-                    <p className="font-semibold">The Future of Artificial Intelligence</p>
-                    <p className="mt-1 text-xs text-slate-400">12:45 &bull; 1.2M views &bull; 3 days ago</p>
-                  </div>
-                </Card>
-
-                <Card>
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-indigo-100 text-indigo-600 dark:bg-indigo-900/40 dark:text-indigo-300">
-                        <FileDown className="h-6 w-6" />
-                      </span>
-                      <div>
-                        <p className="font-semibold">Export Anywhere</p>
-                        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                          Download your summaries, notes, and quizzes in PDF format.
-                        </p>
-                      </div>
-                    </div>
-                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-50 text-xs font-bold text-red-500 dark:bg-red-900/30">
-                      PDF
-                    </span>
-                  </div>
-                </Card>
-
-                <Card>
-                  <div className="flex items-center gap-3">
-                    <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-sky-100 text-sky-600 dark:bg-sky-900/40 dark:text-sky-300">
-                      <Globe className="h-6 w-6" />
-                    </span>
-                    <div>
-                      <p className="font-semibold">Multi-language Support</p>
-                      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                        Summaries available in multiple languages for global learners.
-                      </p>
-                    </div>
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {['English', 'Hindi', 'Spanish', 'French', '+10'].map((l) => (
-                      <span
-                        key={l}
-                        className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600 dark:bg-slate-700 dark:text-slate-300"
-                      >
-                        {l}
-                      </span>
-                    ))}
-                  </div>
-                </Card>
-              </div>
-            </div>
+            <p className="mt-3 text-sm sm:text-base font-medium text-slate-600 dark:text-slate-300">
+              Upload any local video or import YouTube content. Enjoy synchronized captions,
+              seamless translation into Telugu, Hindi, Chinese, Korean, English, and full CC toggle controls.
+            </p>
           </div>
 
-          {/* Stats bar */}
-          <div className="mt-12 grid grid-cols-2 gap-6 rounded-2xl border border-white/70 bg-white/80 p-6 backdrop-blur dark:border-slate-700 dark:bg-slate-800/80 lg:grid-cols-4">
+          {/* Quick Stats Bar */}
+          <div className="mt-12 grid grid-cols-2 gap-4 rounded-2xl border border-slate-200/80 bg-slate-50/70 p-5 dark:border-slate-800 dark:bg-slate-950/50 sm:grid-cols-4">
             {[
-              { icon: Users, color: 'text-violet-500', value: '50K+', label: 'Happy Users' },
-              { icon: FileText, color: 'text-orange-500', value: '200K+', label: 'Summaries Generated' },
-              { icon: Clock, color: 'text-sky-500', value: '1M+', label: 'Hours Saved' },
-              { icon: Star, color: 'text-green-500', value: '4.8/5', label: 'User Rating' },
+              { icon: Upload, color: 'text-teal-500', value: 'Instant', label: 'Local Video Upload' },
+              { icon: Languages, color: 'text-cyan-500', value: 'Telugu & Hindi', label: 'Multilingual Subtitles' },
+              { icon: Clock, color: 'text-emerald-500', value: '100%', label: 'Synced Timestamps' },
+              { icon: ShieldCheck, color: 'text-blue-500', value: 'CC Controls', label: 'Instant ON / OFF Toggle' },
             ].map((s) => (
-              <div key={s.label} className="flex items-center justify-center gap-3">
-                <s.icon className={`h-7 w-7 ${s.color}`} />
+              <div key={s.label} className="flex items-center justify-center gap-3 text-center sm:text-left">
+                <s.icon className={`h-6 w-6 ${s.color} shrink-0`} />
                 <div>
-                  <p className="text-xl font-extrabold">{s.value}</p>
-                  <p className="text-xs text-slate-400">{s.label}</p>
+                  <p className="text-xl font-black text-slate-900 dark:text-white">{s.value}</p>
+                  <p className="text-[11px] font-semibold text-slate-400">{s.label}</p>
                 </div>
               </div>
             ))}
@@ -338,176 +138,220 @@ export default async function LandingPage({
         </div>
       </section>
 
-      {/* ── About ──────────────────────────────────────────────────────── */}
-      <section id="about" className="mx-auto max-w-7xl scroll-mt-20 px-4 py-20 sm:px-6">
-        <div className="grid items-center gap-10 lg:grid-cols-2">
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-wide text-indigo-600 dark:text-indigo-400">
-              About Us
-            </p>
-            <h2 className="mt-2 text-3xl font-bold sm:text-4xl">
-              Turn YouTube into your personal classroom
-            </h2>
-            <p className="mt-4 text-slate-500 dark:text-slate-400">
-              YouTube Summary is an AI-powered learning platform. Search any topic — from React to
-              Machine Learning — and we fetch the 10 best videos, read through every transcript,
-              and merge everything into one clean, structured study document: key concepts,
-              detailed explanations, examples, interview questions, quizzes, and practical
-              exercises.
-            </p>
-            <ul className="mt-6 space-y-3">
-              {[
-                'One study document distilled from 10 expert videos',
-                'Interactive quizzes with hidden answers and live scoring',
-                'Interview questions and notes downloadable as PDF',
-                'Your history, tokens, and notes are private to your account',
-              ].map((t) => (
-                <li key={t} className="flex items-start gap-2 text-slate-600 dark:text-slate-300">
-                  <Check className="mt-0.5 h-5 w-5 shrink-0 text-green-500" /> {t}
-                </li>
-              ))}
-            </ul>
-          </div>
-          <div className="rounded-3xl bg-gradient-to-br from-indigo-600 to-violet-600 p-8 text-white sm:p-10">
-            <GraduationCap className="h-10 w-10" />
-            <h3 className="mt-4 text-2xl font-bold">How it works</h3>
-            <ol className="mt-5 space-y-4">
-              {[
-                'Sign in with Google — your account is created instantly.',
-                'Search any topic you want to learn.',
-                'We fetch the top 10 YouTube videos and their transcripts.',
-                'AI merges everything into one structured study document.',
-                'Study, take the quiz, and export your notes as PDF.',
-              ].map((step, i) => (
-                <li key={step} className="flex items-start gap-3">
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/20 text-sm font-bold">
-                    {i + 1}
-                  </span>
-                  <span className="text-indigo-50">{step}</span>
-                </li>
-              ))}
-            </ol>
-          </div>
+      {/* ── Workflow (How it Works) ────────────────────────────────────── */}
+      <section id="how-it-works" className="mx-auto max-w-7xl scroll-mt-20 px-4 py-20 sm:px-6">
+        <div className="text-center max-w-3xl mx-auto">
+          <p className="text-xs font-bold uppercase tracking-wider text-teal-600 dark:text-teal-400">
+            Intuitive Experience
+          </p>
+          <h2 className="mt-2 text-3xl font-black tracking-tight sm:text-4xl text-slate-900 dark:text-white">
+            The Complete Subtitle Workflow
+          </h2>
+          <p className="mt-3 text-sm sm:text-base text-slate-500 dark:text-slate-400">
+            From raw video file to synchronized multilingual subtitles in three quick steps.
+          </p>
+        </div>
+
+        <div className="mt-12 grid gap-6 sm:grid-cols-3">
+          {[
+            {
+              step: '01',
+              title: 'Upload Supported Video',
+              desc: 'Click Upload Video in your workspace to select any MP4, WebM, OGG, MOV, or MKV file. Instant validation ensures invalid formats are rejected cleanly.',
+              icon: Upload,
+              accent: 'from-teal-500 to-cyan-500',
+            },
+            {
+              step: '02',
+              title: 'Choose Target Language',
+              desc: 'Select Telugu, Hindi, Chinese, Korean, English, or other supported languages from the dropdown. Then click Translate to convert the transcript.',
+              icon: Languages,
+              accent: 'from-cyan-500 to-blue-500',
+            },
+            {
+              step: '03',
+              title: 'Play & Toggle Closed Captions',
+              desc: 'Subtitles stay synchronized across playback, pause, and seeking. Toggle CC ON or OFF anytime with active translations fully preserved.',
+              icon: Award,
+              accent: 'from-emerald-500 to-teal-500',
+            },
+          ].map((item) => (
+            <div
+              key={item.step}
+              className="group relative overflow-hidden rounded-3xl border border-slate-200/80 bg-white/80 p-6 shadow-sm backdrop-blur transition-all duration-300 hover:-translate-y-1 hover:border-teal-500/40 hover:shadow-glow-sm dark:border-slate-800 dark:bg-slate-900/80"
+            >
+              <div className="flex items-center justify-between">
+                <span className={`flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-tr ${item.accent} text-white shadow-xs`}>
+                  <item.icon className="h-5 w-5" />
+                </span>
+                <span className="font-mono text-2xl font-black text-slate-200 dark:text-slate-800 group-hover:text-teal-500/30 transition-colors">
+                  {item.step}
+                </span>
+              </div>
+              <h3 className="mt-5 text-base font-bold text-slate-900 dark:text-white">{item.title}</h3>
+              <p className="mt-2 text-xs leading-relaxed text-slate-500 dark:text-slate-400">{item.desc}</p>
+            </div>
+          ))}
         </div>
       </section>
 
       {/* ── Features ───────────────────────────────────────────────────── */}
-      <section id="features" className="scroll-mt-20 bg-slate-50 py-20 dark:bg-slate-900/60">
+      <section id="features" className="scroll-mt-20 bg-slate-100/50 py-20 dark:bg-slate-950/40">
         <div className="mx-auto max-w-7xl px-4 sm:px-6">
-          <div className="text-center">
-            <p className="text-sm font-semibold uppercase tracking-wide text-indigo-600 dark:text-indigo-400">
-              Features
+          <div className="text-center max-w-3xl mx-auto">
+            <p className="text-xs font-bold uppercase tracking-wider text-teal-600 dark:text-teal-400">
+              Powerful Capabilities
             </p>
-            <h2 className="mt-2 text-3xl font-bold sm:text-4xl">Everything you need to learn faster</h2>
+            <h2 className="mt-2 text-3xl font-black tracking-tight sm:text-4xl text-slate-900 dark:text-white">
+              Features Built for Multilingual Video Learning
+            </h2>
+            <p className="mt-3 text-sm sm:text-base text-slate-500 dark:text-slate-400">
+              Complete video transcription, translation, and study notes in one platform.
+            </p>
           </div>
+
           <div className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {[
-              { icon: Youtube, title: 'Top 10 Video Curation', desc: 'Every search pulls the 10 most relevant YouTube videos with title, channel, duration, views, and publish date.' },
-              { icon: Bot, title: 'AI Summary & Smart Notes', desc: 'Transcripts from all videos are merged into one deduplicated study document — better than any single video.' },
-              { icon: ListOrdered, title: 'Interactive Quizzes', desc: '10 MCQs per topic with answers hidden until you attempt each question, plus live scoring.' },
-              { icon: NotebookText, title: 'Interview Prep', desc: 'A dedicated interview questions module for every topic, downloadable as a clean PDF.' },
-              { icon: FileDown, title: 'PDF Export', desc: 'Export study notes, interview questions, and quizzes as professionally formatted PDFs.' },
-              { icon: Coins, title: 'Token Usage Tracking', desc: 'Prompt, completion, and total AI tokens tracked per search — always know your usage.' },
-              { icon: History, title: 'Search & History', desc: 'Search any topic with no restrictions; every search, summary, and export is saved to your private history.' },
-              { icon: LayoutDashboard, title: 'Personal Dashboard', desc: 'Recent searches, generated notes, and usage stats — everything in one clean, responsive dashboard.' },
-              { icon: ShieldCheck, title: 'Secure Admin Panel', desc: 'Google sign-in with row-level security, plus an admin panel to monitor users, searches, and tokens.' },
+              {
+                icon: Upload,
+                title: 'Local File Validation & Upload',
+                desc: 'Safely select video files from your computer. Validates supported containers (MP4, WebM, OGG, MOV, MKV) with clear feedback.',
+              },
+              {
+                icon: Languages,
+                title: 'Telugu, Hindi & Global Translations',
+                desc: 'Translate transcripts into Telugu, Hindi, Korean, Chinese, and European languages with contextual accuracy and natural phrasing.',
+              },
+              {
+                icon: Clock,
+                title: 'Frame-Accurate Subtitle Sync',
+                desc: 'Subtitles dynamically synchronize with video timestamps during continuous playback, pausing, resuming, and seeking.',
+              },
+              {
+                icon: ListChecks,
+                title: 'CC ON/OFF Subtitle Toggling',
+                desc: 'Turn subtitles ON or OFF anytime while video continues playing. Translations remain cached and ready in memory.',
+              },
+              {
+                icon: Youtube,
+                title: 'YouTube URL Import Compatibility',
+                desc: 'Paste any public YouTube URL to load video and caption tracks directly into the same player and subtitle controls.',
+              },
+              {
+                icon: FileText,
+                title: 'AI Video Study Notes & Synopsis',
+                desc: 'Generate comprehensive study notes, structured concepts, and downloadable PDF study guides directly from your videos.',
+              },
             ].map((f) => (
               <div
                 key={f.title}
-                className="rounded-2xl border border-slate-200 bg-white p-6 transition hover:-translate-y-1 hover:shadow-lg dark:border-slate-700 dark:bg-slate-800"
+                className="group relative overflow-hidden rounded-3xl border border-slate-200/80 bg-white/90 p-7 shadow-sm backdrop-blur transition-all duration-300 hover:-translate-y-1 hover:border-teal-500/40 hover:shadow-glow-sm dark:border-slate-800 dark:bg-slate-900/80"
               >
-                <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600 dark:bg-slate-700 dark:text-indigo-300">
+                <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-teal-50 text-teal-600 transition-colors group-hover:bg-teal-500 group-hover:text-white dark:bg-teal-950/60 dark:text-teal-400">
                   <f.icon className="h-6 w-6" />
                 </span>
-                <h3 className="mt-4 text-lg font-semibold">{f.title}</h3>
-                <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">{f.desc}</p>
+                <h3 className="mt-5 text-base font-bold text-slate-900 dark:text-white">{f.title}</h3>
+                <p className="mt-2 text-xs sm:text-sm leading-relaxed text-slate-500 dark:text-slate-400">
+                  {f.desc}
+                </p>
               </div>
             ))}
           </div>
         </div>
       </section>
 
- 
-      {/* ── Blog ───────────────────────────────────────────────────────── */}
-      <section id="blog" className="scroll-mt-20 bg-slate-50 py-20 dark:bg-slate-900/60">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6">
-          <div className="text-center">
-            <p className="text-sm font-semibold uppercase tracking-wide text-indigo-600 dark:text-indigo-400">
-              Blog
-            </p>
-            <h2 className="mt-2 text-3xl font-bold sm:text-4xl">Learning tips & product updates</h2>
-          </div>
-          <div className="mt-12 grid gap-6 lg:grid-cols-3">
-            {[
-              { tag: 'Study Tips', title: 'How to learn any tech topic in a weekend', blurb: 'A practical system for compressing 10 hours of video into 2 hours of focused study.', art: <StudyIllustration /> },
-              { tag: 'Product', title: 'Quizzes now hide answers until you attempt', blurb: 'Our quiz module now scores you live and never spoils the answer before you try.', art: <QuizIllustration /> },
-              { tag: 'AI', title: 'Why 10 videos beat 1 — the science of synthesis', blurb: 'Merging multiple expert explanations fills the gaps any single tutorial leaves behind.', art: <SynthesisIllustration /> },
-            ].map((b) => (
-              <article
-                key={b.title}
-                className="overflow-hidden rounded-2xl border border-slate-200 bg-white transition hover:-translate-y-1 hover:shadow-lg dark:border-slate-700 dark:bg-slate-800"
-              >
-                {b.art}
-                <div className="p-6">
-                  <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-600 dark:bg-slate-700 dark:text-indigo-300">
-                    {b.tag}
-                  </span>
-                  <h3 className="mt-3 text-lg font-semibold leading-snug">{b.title}</h3>
-                  <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">{b.blurb}</p>
-                </div>
-              </article>
-            ))}
-          </div>
+      {/* ── Insights / Blog ────────────────────────────────────────────── */}
+      <section id="insights" className="mx-auto max-w-7xl scroll-mt-20 px-4 py-20 sm:px-6">
+        <div className="text-center max-w-3xl mx-auto">
+          <p className="text-xs font-bold uppercase tracking-wider text-teal-600 dark:text-teal-400">
+            Research & Methodology
+          </p>
+          <h2 className="mt-2 text-3xl font-black tracking-tight sm:text-4xl text-slate-900 dark:text-white">
+            Latest Learning Insights
+          </h2>
+        </div>
+
+        <div className="mt-12 grid gap-6 lg:grid-cols-3">
+          {[
+            {
+              tag: 'Study Strategy',
+              title: 'How to learn any complex tech stack in 48 hours',
+              blurb: 'A tactical blueprint for condensing hours of video lectures into focused, deliberate study sessions.',
+              art: <StudyIllustration />,
+            },
+            {
+              tag: 'Multilingual Learning',
+              title: 'Accelerating comprehension with native-language subtitles',
+              blurb: 'How synchronized captions in regional languages like Telugu and Hindi boost understanding of complex subjects.',
+              art: <QuizIllustration />,
+            },
+            {
+              tag: 'Cognitive Science',
+              title: 'Dual-track processing: The power of synchronized captions',
+              blurb: 'Aligning real-time video audio with synchronized visual text reinforces memory retention and concept clarity.',
+              art: <SynthesisIllustration />,
+            },
+          ].map((b) => (
+            <article
+              key={b.title}
+              className="group overflow-hidden rounded-3xl border border-slate-200/80 bg-white/90 shadow-sm backdrop-blur transition-all duration-300 hover:-translate-y-1 hover:border-teal-500/40 hover:shadow-glow-sm dark:border-slate-800 dark:bg-slate-900/80"
+            >
+              {b.art}
+              <div className="p-6">
+                <span className="rounded-full bg-teal-50 px-3 py-1 text-[11px] font-bold text-teal-700 dark:bg-teal-950/60 dark:text-teal-300">
+                  {b.tag}
+                </span>
+                <h3 className="mt-3 text-base font-bold text-slate-900 dark:text-white leading-snug">
+                  {b.title}
+                </h3>
+                <p className="mt-2 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                  {b.blurb}
+                </p>
+              </div>
+            </article>
+          ))}
         </div>
       </section>
 
       {/* ── Contact ────────────────────────────────────────────────────── */}
       <section id="contact" className="mx-auto max-w-7xl scroll-mt-20 px-4 py-20 sm:px-6">
-        <div className="rounded-3xl bg-gradient-to-r from-indigo-600 to-violet-600 p-8 text-white sm:p-12">
-          <div className="grid items-start gap-10 lg:grid-cols-2">
+        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-teal-700 via-teal-800 to-slate-900 p-8 sm:p-12 text-white shadow-xl">
+          <div className="pointer-events-none absolute -right-20 -top-20 h-80 w-80 rounded-full bg-cyan-400/20 blur-3xl" />
+
+          <div className="relative grid items-start gap-10 lg:grid-cols-2">
             <div>
-              <p className="text-sm font-semibold uppercase tracking-wide text-indigo-200">Contact</p>
-              <h2 className="mt-2 text-3xl font-bold sm:text-4xl">We&apos;d love to hear from you</h2>
-              <p className="mt-3 max-w-xl text-indigo-100">
-                Questions, feedback, or feature requests — reach out and we&apos;ll get back to you.
+              <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-bold text-teal-200 backdrop-blur">
+                Get in Touch
+              </span>
+              <h2 className="mt-4 text-3xl font-black tracking-tight sm:text-4xl text-white">
+                Have questions or feedback?
+              </h2>
+              <p className="mt-3 text-sm text-teal-100/90 leading-relaxed max-w-lg">
+                We are actively refining our video transcription and multilingual translation pipelines.
+                Share your feedback, report an issue, or suggest features.
               </p>
-              <a
-                href="mailto:support@symbiosystech.com"
-                className="mt-6 inline-flex items-center gap-2 rounded-full bg-white/15 px-5 py-2.5 font-medium text-white transition hover:bg-white/25"
-              >
-                <Mail className="h-4 w-4" /> support@symbiosystech.com
-              </a>
-              <div className="mt-6">
-                <p className="text-sm font-semibold text-indigo-200">Follow us</p>
-                <div className="mt-3 flex gap-3">
-                  {[
-                    { icon: Github, label: 'GitHub', href: 'https://github.com/yasaswinipilla41/youtube_summary' },
-                    { icon: Twitter, label: 'Twitter / X', href: 'https://twitter.com' },
-                    { icon: Linkedin, label: 'LinkedIn', href: 'https://linkedin.com' },
-                    { icon: Youtube, label: 'YouTube', href: 'https://youtube.com' },
-                  ].map((s) => (
-                    <a
-                      key={s.label}
-                      href={s.href}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      aria-label={s.label}
-                      className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 transition hover:bg-white/30"
-                    >
-                      <s.icon className="h-5 w-5" />
-                    </a>
-                  ))}
-                </div>
+
+              <div className="mt-6 flex flex-col gap-3">
+                <a
+                  href="mailto:contact@synapsetube.io"
+                  className="inline-flex items-center gap-2 text-sm font-semibold text-teal-200 hover:text-white transition"
+                >
+                  <Mail className="h-4 w-4" /> contact@synapsetube.io
+                </a>
               </div>
-              <Link
-                href={appHref}
-                className="mt-8 inline-flex items-center gap-2 rounded-full border border-white/40 px-6 py-3 font-semibold text-white transition hover:bg-white/10"
-              >
-                Sign In <ArrowRight className="h-4 w-4" />
-              </Link>
+
+              <div className="mt-8">
+                <Link
+                  href="/login"
+                  className="inline-flex items-center gap-2 rounded-full bg-white px-6 py-3.5 text-sm font-bold text-teal-900 shadow-md transition hover:bg-teal-50"
+                >
+                  <span>Started Here &rarr;</span>
+                </Link>
+              </div>
             </div>
-            <div className="rounded-2xl bg-white/10 p-6 backdrop-blur">
-              <h3 className="mb-4 text-lg font-semibold">Send us a message</h3>
+
+            <div className="rounded-3xl border border-white/20 bg-white/10 p-6 backdrop-blur-md">
+              <h3 className="mb-4 text-base font-bold text-white">Send us a direct message</h3>
               <ContactForm />
             </div>
           </div>
@@ -515,17 +359,23 @@ export default async function LandingPage({
       </section>
 
       {/* ── Footer ─────────────────────────────────────────────────────── */}
-      <footer className="border-t border-slate-100 py-8 dark:border-slate-800">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-4 sm:px-6">
-          <p className="text-sm text-slate-400">
-            © {new Date().getFullYear()} YouTube Summary — AI Learning Platform
-          </p>
-          <nav className="flex flex-wrap gap-4">
-            {NAV_LINKS.slice(1).map((l) => (
+      <footer className="border-t border-slate-200/80 py-10 dark:border-slate-800/80">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-6 px-4 sm:px-6">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-teal-500 text-white">
+              <Sparkles className="h-4 w-4" />
+            </div>
+            <span className="text-sm font-bold text-slate-800 dark:text-slate-200">
+              SynapseTube &copy; {new Date().getFullYear()} &bull; AI Video Subtitles & Synthesizer
+            </span>
+          </div>
+
+          <nav className="flex flex-wrap gap-5">
+            {NAV_LINKS.map((l) => (
               <a
                 key={l.href}
                 href={l.href}
-                className="text-sm text-slate-400 transition hover:text-indigo-600 dark:hover:text-indigo-400"
+                className="text-xs font-semibold text-slate-500 hover:text-teal-600 dark:text-slate-400 dark:hover:text-teal-400 transition"
               >
                 {l.label}
               </a>

@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { BookOpen, ListChecks, MessageSquareText, Youtube } from 'lucide-react';
+import { BookOpen, MessageSquareText, Youtube, Sparkles, Layers } from 'lucide-react';
 import { requireUser } from '@/lib/auth';
 import { createClient } from '@/lib/supabase/server';
 import { NotesPanel } from '@/components/NotesPanel';
@@ -15,8 +15,6 @@ export default async function NotesPage({ params }: { params: Promise<{ id: stri
   const profile = await requireUser();
   const supabase = await createClient();
 
-  // RLS guarantees a user can only load their OWN summary — a foreign id
-  // simply returns no rows and 404s.
   const { data: summary } = await supabase
     .from('summaries')
     .select('*')
@@ -36,73 +34,84 @@ export default async function NotesPage({ params }: { params: Promise<{ id: stri
   const modules = [
     {
       href: `/dashboard/notes/${summary.id}/content`,
-      label: 'Study Content',
+      label: 'Core Study Guide',
       icon: BookOpen,
-      desc: 'Learning material only',
+      desc: 'Structured takeaways & concepts',
+      color: 'text-teal-600 dark:text-teal-400 bg-teal-500/10 ring-teal-500/20',
     },
     {
       href: `/dashboard/notes/${summary.id}/interview`,
       label: 'Interview Questions',
       icon: MessageSquareText,
-      desc: 'Practice + download PDF',
-    },
-    {
-      href: `/dashboard/notes/${summary.id}/quiz`,
-      label: 'Quiz',
-      icon: ListChecks,
-      desc: 'Test yourself',
+      desc: 'Technical Q&A + PDF export',
+      color: 'text-cyan-600 dark:text-cyan-400 bg-cyan-500/10 ring-cyan-500/20',
     },
   ];
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex items-start gap-3">
+      {/* Header bar */}
+      <div className="flex flex-wrap items-start justify-between gap-4 rounded-3xl border border-slate-200/80 bg-white/80 p-6 shadow-sm backdrop-blur dark:border-slate-800 dark:bg-slate-900/80">
+        <div className="flex items-start gap-4">
           <BackButton label="Back to History" />
           <div>
-            <p className="text-sm font-medium uppercase tracking-wide text-brand-600 dark:text-brand-100">
-              Study notes
-            </p>
-            <h1 className="mt-1 text-2xl font-bold sm:text-3xl">{summary.topic}</h1>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-              Generated from {videos.length} videos · {formatDate(summary.created_at)}
+            <div className="flex items-center gap-2">
+              <span className="flex h-5 w-5 items-center justify-center rounded-md bg-teal-500/10 text-teal-600 dark:bg-teal-500/20 dark:text-teal-400">
+                <Sparkles className="h-3 w-3" />
+              </span>
+              <p className="text-xs font-bold uppercase tracking-wider text-teal-600 dark:text-teal-400">
+                Video Study Document
+              </p>
+            </div>
+            <h1 className="mt-1 text-2xl font-black tracking-tight sm:text-3xl text-slate-900 dark:text-white">
+              {summary.topic}
+            </h1>
+            <p className="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400">
+              Synthesized from {videos.length} authoritative source video{videos.length === 1 ? '' : 's'} &bull; {formatDate(summary.created_at)}
             </p>
           </div>
         </div>
+
         <ExportPdfButton
           summaryId={summary.id}
           topic={summary.topic}
           userName={profile.name ?? profile.email}
           searchDate={formatDate(summary.created_at)}
           markdown={summary.summary}
+          heading="SynapseTube — Synthesized Study Document"
         />
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      {/* Modules Selector */}
+      <div className="grid gap-3 sm:grid-cols-2">
         {modules.map((m) => (
           <Link
             key={m.href}
             href={m.href}
-            className="group flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 transition hover:-translate-y-0.5 hover:border-brand-500 hover:shadow-md dark:border-slate-700 dark:bg-slate-800"
+            className="group flex items-center gap-3.5 rounded-2xl border border-slate-200/80 bg-white/80 p-4 shadow-2xs backdrop-blur transition-all duration-200 hover:-translate-y-1 hover:border-teal-500/40 hover:shadow-glow-sm dark:border-slate-800 dark:bg-slate-900/80"
           >
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50 text-brand-600 dark:bg-slate-700 dark:text-brand-100">
+            <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ring-1 ${m.color}`}>
               <m.icon className="h-5 w-5" />
             </span>
-            <span>
-              <span className="block font-semibold group-hover:text-brand-600 dark:group-hover:text-brand-100">
+            <div>
+              <span className="block text-sm font-bold text-slate-800 transition-colors group-hover:text-teal-600 dark:text-slate-200 dark:group-hover:text-teal-400">
                 {m.label}
               </span>
               <span className="block text-xs text-slate-400">{m.desc}</span>
-            </span>
+            </div>
           </Link>
         ))}
       </div>
 
+      {/* Source Videos Section */}
       {videos.length > 0 && (
-        <section>
-          <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold">
-            <Youtube className="h-5 w-5 text-red-500" /> Source videos
-          </h2>
+        <section className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="flex items-center gap-2 text-base font-bold text-slate-900 dark:text-white">
+              <Youtube className="h-5 w-5 text-red-500" /> Source YouTube Videos ({videos.length})
+            </h2>
+            <span className="text-xs text-slate-400">Direct links with timestamps</span>
+          </div>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
             {videos.map((v) => (
               <VideoCard key={v.id} video={v} />
@@ -111,6 +120,7 @@ export default async function NotesPage({ params }: { params: Promise<{ id: stri
         </section>
       )}
 
+      {/* Markdown Notes Panel */}
       <NotesPanel markdown={summary.summary} />
     </div>
   );

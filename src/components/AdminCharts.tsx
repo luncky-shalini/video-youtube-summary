@@ -38,10 +38,10 @@ export function TopTopicsChart({ data }: { data: TopicCount[] }) {
           />
           <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
           <Tooltip
-            cursor={{ fill: 'rgba(99,102,241,0.08)' }}
+            cursor={{ fill: 'rgba(13,148,136,0.08)' }}
             contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0' }}
           />
-          <Bar dataKey="count" name="Searches" fill="#6366f1" radius={[6, 6, 0, 0]} />
+          <Bar dataKey="count" name="Searches" fill="#0d9488" radius={[6, 6, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </div>
@@ -61,7 +61,7 @@ export function TokensOverTimeChart({ data }: { data: DailyTokens[] }) {
             type="monotone"
             dataKey="tokens"
             name="Tokens"
-            stroke="#6366f1"
+            stroke="#06b6d4"
             strokeWidth={2.5}
             dot={false}
           />

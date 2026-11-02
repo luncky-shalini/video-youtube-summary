@@ -3,17 +3,15 @@ import { ThemeProvider } from 'next-themes';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'AI Learning Platform',
+  title: 'SynapseTube — Video Upload, YouTube Subtitles & Multilingual AI Translation',
   description:
-    'Search any topic, learn from top YouTube videos, and get AI-generated study notes with quizzes and interview questions.',
+    'Synchronized multilingual video subtitles, instant translations into Telugu, Hindi, Chinese, Korean, English, and study notes for uploaded videos and YouTube.',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className="min-h-screen bg-slate-50 text-slate-900 antialiased dark:bg-slate-900 dark:text-slate-100">
-        {/* Light theme by default everywhere; the navbar toggle switches to
-            dark and the choice is persisted in localStorage. */}
+      <body className="min-h-screen bg-slate-50 text-slate-900 antialiased selection:bg-teal-500/20 selection:text-teal-900 dark:bg-[#0b0f19] dark:text-slate-100 dark:selection:bg-teal-500/30 dark:selection:text-teal-200">
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
           {children}
         </ThemeProvider>

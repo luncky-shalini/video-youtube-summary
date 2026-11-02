@@ -9,10 +9,6 @@ import { extractSections, parseQuiz } from '@/lib/markdown';
 import { formatDate } from '@/lib/utils';
 import type { Summary } from '@/lib/types';
 
-/**
- * Quiz module — interactive when the quiz can be parsed (answers hidden
- * until the user attempts each question), with PDF download.
- */
 export default async function QuizPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const profile = await requireUser();
@@ -31,17 +27,19 @@ export default async function QuizPage({ params }: { params: Promise<{ id: strin
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex items-start gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-4 rounded-3xl border border-slate-200/80 bg-white/80 p-6 shadow-sm backdrop-blur dark:border-slate-800 dark:bg-slate-900/80">
+        <div className="flex items-start gap-4">
           <BackButton />
           <div>
-            <p className="text-sm font-medium uppercase tracking-wide text-brand-600 dark:text-brand-100">
-              Quiz
+            <p className="text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+              Interactive Assessment
             </p>
-            <h1 className="mt-1 text-2xl font-bold sm:text-3xl">{summary.topic}</h1>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            <h1 className="mt-1 text-2xl font-black tracking-tight sm:text-3xl text-slate-900 dark:text-white">
+              {summary.topic}
+            </h1>
+            <p className="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400">
               {questions.length > 0
-                ? `${questions.length} questions — answers stay hidden until you attempt each one`
+                ? `${questions.length} questions &bull; Immediate feedback & live scoring`
                 : formatDate(summary.created_at)}
             </p>
           </div>
@@ -53,7 +51,7 @@ export default async function QuizPage({ params }: { params: Promise<{ id: strin
             userName={profile.name ?? profile.email}
             searchDate={formatDate(summary.created_at)}
             markdown={quizMd}
-            heading="Quiz"
+            heading="SynapseTube — Knowledge Quiz"
             label="Download PDF"
             fileSuffix="quiz"
           />
@@ -65,8 +63,8 @@ export default async function QuizPage({ params }: { params: Promise<{ id: strin
       ) : quizMd ? (
         <NotesPanel markdown={quizMd} />
       ) : (
-        <p className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-slate-400 dark:border-slate-700 dark:bg-slate-800">
-          This study document has no quiz section.
+        <p className="rounded-3xl border border-slate-200/80 bg-white/80 p-8 text-center text-sm font-medium text-slate-400 dark:border-slate-800 dark:bg-slate-900/80">
+          This study document does not have a parsed quiz section.
         </p>
       )}
     </div>

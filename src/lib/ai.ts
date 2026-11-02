@@ -29,17 +29,37 @@ function getProviders(): Provider[] {
   const providers: Provider[] = [];
 
   if (process.env.GROQ_API_KEY) {
-    providers.push({
-      name: 'groq',
-      client: new OpenAI({
-        apiKey: process.env.GROQ_API_KEY,
-        baseURL: 'https://api.groq.com/openai/v1',
-        // Groq free tier has per-minute token limits; the SDK honors
-        // retry-after on 429s, so retries ride out the rate window.
-        maxRetries: 5,
-      }),
-      model: process.env.GROQ_MODEL ?? 'llama-3.3-70b-versatile',
+    const groqClient = new OpenAI({
+      apiKey: process.env.GROQ_API_KEY,
+      baseURL: 'https://api.groq.com/openai/v1',
+      // Groq free tier has per-minute token limits; the SDK honors
+      // retry-after on 429s, so retries ride out the rate window.
+      maxRetries: 3,
     });
+
+    const primaryModel = process.env.GROQ_MODEL?.trim() || 'openai/gpt-oss-120b';
+    providers.push({
+      name: `groq (${primaryModel})`,
+      client: groqClient,
+      model: primaryModel,
+    });
+
+    // Active fallback models on Groq in case the primary model is decommissioned,
+    // not available on the user's tier, or rate-limited.
+    const candidateFallbacks = [
+      'openai/gpt-oss-120b',
+      'qwen/qwen3.8-27b',
+      'openai/gpt-oss-20b',
+    ];
+    for (const fb of candidateFallbacks) {
+      if (fb !== primaryModel) {
+        providers.push({
+          name: `groq (${fb})`,
+          client: groqClient,
+          model: fb,
+        });
+      }
+    }
   }
 
   if (process.env.OPENAI_API_KEY) {

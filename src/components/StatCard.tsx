@@ -6,34 +6,42 @@ interface Props {
   label: string;
   value: string;
   hint?: string;
-  /** When set, the whole card becomes a link with a hover affordance. */
   href?: string;
 }
 
 function CardBody({ icon: Icon, label, value, hint }: Omit<Props, 'href'>) {
   return (
-    <>
-      <div className="flex items-center gap-3">
-        <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50 text-brand-600 dark:bg-slate-700 dark:text-brand-100">
-          <Icon className="h-5 w-5" />
+    <div className="relative overflow-hidden">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+          {label}
+        </p>
+        <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-teal-500/10 to-cyan-500/10 text-teal-600 ring-1 ring-teal-500/20 dark:from-teal-500/20 dark:to-cyan-500/20 dark:text-teal-400 dark:ring-teal-500/30">
+          <Icon className="h-4 w-4" />
         </span>
-        <p className="text-sm text-slate-500 dark:text-slate-400">{label}</p>
       </div>
-      <p className="mt-3 text-2xl font-bold">{value}</p>
-      {hint && <p className="mt-1 text-xs text-slate-400">{hint}</p>}
-    </>
+      <p className="mt-3 text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+        {value}
+      </p>
+      {hint && (
+        <div className="mt-2 flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-teal-500" />
+          <span>{hint}</span>
+        </div>
+      )}
+    </div>
   );
 }
 
 export function StatCard({ href, ...body }: Props) {
   const base =
-    'rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-800';
+    'relative rounded-2xl border border-slate-200/80 bg-white/80 p-5 shadow-sm backdrop-blur-sm transition-all duration-300 dark:border-slate-800 dark:bg-slate-900/70';
 
   if (href) {
     return (
       <Link
         href={href}
-        className={`block ${base} transition hover:-translate-y-0.5 hover:border-brand-500 hover:shadow-md`}
+        className={`group block ${base} hover:-translate-y-1 hover:border-teal-500/40 hover:shadow-glow-sm dark:hover:border-teal-500/40`}
       >
         <CardBody {...body} />
       </Link>

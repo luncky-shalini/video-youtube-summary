@@ -8,10 +8,6 @@ import { excludeSections } from '@/lib/markdown';
 import { formatDate } from '@/lib/utils';
 import type { Summary } from '@/lib/types';
 
-/**
- * Learning-content-only view: the study material without YouTube videos,
- * interview questions, or quiz — those live in their own modules.
- */
 export default async function ContentPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const profile = await requireUser();
@@ -29,16 +25,18 @@ export default async function ContentPage({ params }: { params: Promise<{ id: st
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex items-start gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-4 rounded-3xl border border-slate-200/80 bg-white/80 p-6 shadow-sm backdrop-blur dark:border-slate-800 dark:bg-slate-900/80">
+        <div className="flex items-start gap-4">
           <BackButton />
           <div>
-            <p className="text-sm font-medium uppercase tracking-wide text-brand-600 dark:text-brand-100">
-              Study content
+            <p className="text-xs font-bold uppercase tracking-wider text-teal-600 dark:text-teal-400">
+              Core Study Guide
             </p>
-            <h1 className="mt-1 text-2xl font-bold sm:text-3xl">{summary.topic}</h1>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-              {formatDate(summary.created_at)}
+            <h1 className="mt-1 text-2xl font-black tracking-tight sm:text-3xl text-slate-900 dark:text-white">
+              {summary.topic}
+            </h1>
+            <p className="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400">
+              Structured study material &bull; {formatDate(summary.created_at)}
             </p>
           </div>
         </div>
@@ -48,7 +46,7 @@ export default async function ContentPage({ params }: { params: Promise<{ id: st
           userName={profile.name ?? profile.email}
           searchDate={formatDate(summary.created_at)}
           markdown={content}
-          heading="AI Learning Platform — Study Content"
+          heading="SynapseTube — Core Study Guide"
           fileSuffix="study-content"
         />
       </div>
