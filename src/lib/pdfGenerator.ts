@@ -195,7 +195,7 @@ export async function exportSynopsisPdf(synopsis: VideoSynopsisData, customFilen
   `;
   container.appendChild(page1);
 
-  // ── PAGE 2: 4. Key Topics Covered & 7. Outcomes & Conclusions ──────
+  // ── PAGE 2: 4. Key Topics Covered & 5. Key Moments & Timeline ──────
   const page2 = document.createElement('div');
   page2.className = 'pdf-page';
   page2.style.cssText = `
@@ -211,6 +211,8 @@ export async function exportSynopsisPdf(synopsis: VideoSynopsisData, customFilen
   `;
 
   const topicsList = synopsis.keyTopicsCovered || synopsis.keyTopics || [];
+  const momentsList = synopsis.keyMomentsTimeline || synopsis.keyMoments || [];
+  const charactersList = synopsis.charactersSpeakersDialogue || [];
 
   page2.innerHTML = `
     <div>
@@ -247,47 +249,8 @@ export async function exportSynopsisPdf(synopsis: VideoSynopsisData, customFilen
         </div>
       </div>
 
-      <!-- Section 7: Outcomes & Conclusions (ALWAYS IN ENGLISH) -->
-      <div style="margin-top: 20px;">
-        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">
-          <span style="background: #0284c7; color: white; border-radius: 6px; font-size: 11px; font-weight: 800; padding: 2px 7px;">7</span>
-          <h2 style="font-size: 13.5px; font-weight: 800; color: #0f172a; text-transform: uppercase; letter-spacing: 0.5px; margin: 0;">
-            Outcomes & Conclusions
-          </h2>
-        </div>
-        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 18px; font-size: 12px; line-height: 1.65; color: #1e293b; font-weight: 500;">
-          ${escapeHtml(synopsis.outcomesAndConclusions || synopsis.conclusion || '')}
-        </div>
-      </div>
-    </div>
-    ${createFooterHtml(2)}
-  `;
-  container.appendChild(page2);
-
-  // ── PAGE 3: 5. Key Moments & Timeline & 6. Characters / Speakers ─────
-  const page3 = document.createElement('div');
-  page3.className = 'pdf-page';
-  page3.style.cssText = `
-    width: 794px;
-    height: 1123px;
-    box-sizing: border-box;
-    padding: 38px 44px;
-    background: #ffffff;
-    font-family: ${COMMON_FONT};
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-  `;
-
-  const momentsList = synopsis.keyMomentsTimeline || synopsis.keyMoments || [];
-  const charactersList = synopsis.charactersSpeakersDialogue || [];
-
-  page3.innerHTML = `
-    <div>
-      ${createHeaderHtml(false, 3)}
-
       <!-- Section 5: Key Moments & Timeline (ORIGINAL SPOKEN LANGUAGE & SCRIPT) -->
-      <div style="margin-bottom: 22px;">
+      <div style="margin-top: 14px;">
         <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
           <div style="display: flex; align-items: center; gap: 8px;">
             <span style="background: #0d9488; color: white; border-radius: 6px; font-size: 11px; font-weight: 800; padding: 2px 7px;">5</span>
@@ -322,9 +285,32 @@ export async function exportSynopsisPdf(synopsis: VideoSynopsisData, customFilen
           }
         </div>
       </div>
+    </div>
+    ${createFooterHtml(2)}
+  `;
+  container.appendChild(page2);
+
+  // ── PAGE 3: 6. Characters / Speakers & 7. Outcomes & Conclusions ─────
+  const page3 = document.createElement('div');
+  page3.className = 'pdf-page';
+  page3.style.cssText = `
+    width: 794px;
+    height: 1123px;
+    box-sizing: border-box;
+    padding: 38px 44px;
+    background: #ffffff;
+    font-family: ${COMMON_FONT};
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  `;
+
+  page3.innerHTML = `
+    <div>
+      ${createHeaderHtml(false, 3)}
 
       <!-- Section 6: Characters / Speakers & Dialogue (ORIGINAL SPOKEN LANGUAGE & SCRIPT) -->
-      <div>
+      <div style="margin-bottom: 22px;">
         <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
           <div style="display: flex; align-items: center; gap: 8px;">
             <span style="background: #0284c7; color: white; border-radius: 6px; font-size: 11px; font-weight: 800; padding: 2px 7px;">6</span>
@@ -332,7 +318,7 @@ export async function exportSynopsisPdf(synopsis: VideoSynopsisData, customFilen
               Characters / Speakers & Dialogue
             </h2>
           </div>
-          <span style="font-size: 10px; color: #0284c7; font-weight: 700;">English Labels &bull; Original Dialogue</span>
+          <span style="font-size: 10px; color: #0284c7; font-weight: 700;">English Labels &bull; Original Dialogue (${escapeHtml(synopsis.originalLanguage || synopsis.language)})</span>
         </div>
         <div style="display: flex; flex-direction: column; gap: 8px;">
           ${
@@ -354,6 +340,19 @@ export async function exportSynopsisPdf(synopsis: VideoSynopsisData, customFilen
                   )
                   .join('')
           }
+        </div>
+      </div>
+
+      <!-- Section 7: Outcomes & Conclusions (ALWAYS IN ENGLISH) -->
+      <div style="margin-top: 14px;">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">
+          <span style="background: #0d9488; color: white; border-radius: 6px; font-size: 11px; font-weight: 800; padding: 2px 7px;">7</span>
+          <h2 style="font-size: 13.5px; font-weight: 800; color: #0f172a; text-transform: uppercase; letter-spacing: 0.5px; margin: 0;">
+            Outcomes & Conclusions
+          </h2>
+        </div>
+        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 18px; font-size: 12px; line-height: 1.65; color: #1e293b; font-weight: 500;">
+          ${escapeHtml(synopsis.outcomesAndConclusions || synopsis.conclusion || '')}
         </div>
       </div>
     </div>

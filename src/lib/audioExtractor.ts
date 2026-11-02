@@ -1,19 +1,101 @@
 /**
- * Client-side audio extraction and optimization utility.
+ * Client-side audio extraction and chunking optimization utility.
  * Decodes video audio tracks client-side using Web Audio API and encodes
- * a lightweight 16kHz mono WAV file for Whisper transcription.
- * Reduces upload payload by 90-98%, avoiding network timeouts and connection drops.
+ * lightweight 12kHz mono WAV chunks for Whisper transcription.
+ *
+ * Guarantees every upload request payload is strictly <= 2.5MB, safely beneath
+ * Vercel Serverless Function's 4.5MB request body limit (HTTP 413 Function Payload Too Large).
+ * Enables seamless transcription of videos of ANY duration (2 mins, 5 mins, 15+ mins).
  */
 
+export interface AudioChunk {
+  blob: Blob;
+  startOffset: number;
+  duration: number;
+  chunkIndex: number;
+  totalChunks: number;
+}
+
+const TARGET_SAMPLE_RATE = 12000; // 12kHz mono = 24,000 bytes/sec PCM. Pristine voice clarity for Whisper.
+const CHUNK_DURATION_SECONDS = 80; // 80s * 24,000 B/s = ~1.92 MB per chunk (well below Vercel's 4.5MB limit)
+
+/**
+ * Extracts and chunks audio from a video file into <= 2.5MB segments.
+ * Returns an array of AudioChunks with start offsets.
+ */
+export async function extractAudioChunksFromVideo(
+  file: File,
+  onProgress?: (msg: string) => void
+): Promise<AudioChunk[] | null> {
+  if (typeof window === 'undefined') return null;
+
+  const AudioContextClass =
+    window.AudioContext ||
+    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+
+  if (!AudioContextClass) return null;
+
+  try {
+    onProgress?.('Decoding audio from video...');
+    const arrayBuffer = await file.arrayBuffer();
+    const tempCtx = new AudioContextClass();
+
+    // Pass arrayBuffer slice so original buffer is not detached
+    const audioBuffer = await tempCtx.decodeAudioData(arrayBuffer.slice(0));
+    tempCtx.close().catch(() => { });
+
+    const duration = audioBuffer.duration;
+    if (!duration || duration <= 0) return null;
+
+    const totalChunks = Math.max(1, Math.ceil(duration / CHUNK_DURATION_SECONDS));
+    const chunks: AudioChunk[] = [];
+
+    for (let i = 0; i < totalChunks; i++) {
+      const startSec = i * CHUNK_DURATION_SECONDS;
+      const endSec = Math.min((i + 1) * CHUNK_DURATION_SECONDS, duration);
+      const chunkDur = endSec - startSec;
+      if (chunkDur <= 0.2) continue;
+
+      const numFrames = Math.ceil(chunkDur * TARGET_SAMPLE_RATE);
+      const offlineCtx = new OfflineAudioContext(1, numFrames, TARGET_SAMPLE_RATE);
+
+      const source = offlineCtx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(offlineCtx.destination);
+      // Start buffer playback with negative offset relative to chunk start
+      source.start(0, startSec, chunkDur);
+
+      const renderedBuffer = await offlineCtx.startRendering();
+      const wavBlob = audioBufferToWavBlob(renderedBuffer);
+
+      chunks.push({
+        blob: wavBlob,
+        startOffset: Math.round(startSec * 10) / 10,
+        duration: Math.round(chunkDur * 10) / 10,
+        chunkIndex: i,
+        totalChunks,
+      });
+    }
+
+    return chunks.length > 0 ? chunks : null;
+  } catch (err) {
+    console.warn('Client-side audio extraction notice:', err);
+    return null;
+  }
+}
+
+/**
+ * Single-chunk audio extractor (backward compatibility).
+ * Downsamples to 12kHz mono WAV to guarantee <= 3.5MB for videos up to 2.5 minutes.
+ */
 export async function extractAudioFromVideoFile(file: File): Promise<Blob | null> {
   if (typeof window === 'undefined') return null;
 
-  // If already an audio file or very small (< 2MB), upload directly
-  if (file.type.startsWith('audio/') || file.size < 2 * 1024 * 1024) {
+  // If already an audio file and <= 3MB, upload directly
+  if (file.type.startsWith('audio/') && file.size < 3.5 * 1024 * 1024) {
     return null;
   }
 
-  // Safety check: AudioContext support
   const AudioContextClass =
     window.AudioContext ||
     (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
@@ -23,18 +105,14 @@ export async function extractAudioFromVideoFile(file: File): Promise<Blob | null
   try {
     const arrayBuffer = await file.arrayBuffer();
     const tempCtx = new AudioContextClass();
-    const audioBuffer = await tempCtx.decodeAudioData(arrayBuffer);
-    tempCtx.close().catch(() => {});
+    const audioBuffer = await tempCtx.decodeAudioData(arrayBuffer.slice(0));
+    tempCtx.close().catch(() => { });
 
-    // Target sample rate for Whisper is 16,000Hz mono
-    const targetSampleRate = 16000;
     const duration = audioBuffer.duration;
-    const numFrames = Math.ceil(duration * targetSampleRate);
+    if (!duration || duration <= 0) return null;
 
-    // If audio is empty or invalid
-    if (numFrames <= 0 || duration <= 0) return null;
-
-    const offlineCtx = new OfflineAudioContext(1, numFrames, targetSampleRate);
+    const numFrames = Math.ceil(duration * TARGET_SAMPLE_RATE);
+    const offlineCtx = new OfflineAudioContext(1, numFrames, TARGET_SAMPLE_RATE);
     const source = offlineCtx.createBufferSource();
     source.buffer = audioBuffer;
     source.connect(offlineCtx.destination);
@@ -89,4 +167,3 @@ function audioBufferToWavBlob(buffer: AudioBuffer): Blob {
 
   return new Blob([arrayBuf], { type: 'audio/wav' });
 }
-

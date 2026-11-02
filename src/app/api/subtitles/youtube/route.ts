@@ -3,7 +3,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { YoutubeTranscript } from 'youtube-transcript';
 import type { SubtitleCue } from '../translate/route';
 import OpenAI from 'openai';
-import https from 'node:https';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -60,19 +59,13 @@ function decodeHtmlEntities(text: string): string {
 }
 
 function getAIClient() {
-  const httpsAgent = new https.Agent({
-    keepAlive: false,
-    timeout: 120000,
-  });
-
   if (process.env.GROQ_API_KEY) {
     return {
       client: new OpenAI({
         apiKey: process.env.GROQ_API_KEY,
         baseURL: 'https://api.groq.com/openai/v1',
-        httpAgent: httpsAgent,
         maxRetries: 2,
-        timeout: 120000,
+        timeout: 60000,
       }),
       model: process.env.GROQ_MODEL || 'openai/gpt-oss-120b',
     };
@@ -82,7 +75,6 @@ function getAIClient() {
       client: new OpenAI({
         apiKey: process.env.OPENAI_API_KEY,
         baseURL: process.env.OPENAI_BASE_URL || undefined,
-        httpAgent: httpsAgent,
         maxRetries: 1,
         timeout: 60000,
       }),
@@ -249,7 +241,7 @@ async function transcribeYouTubeAudioViaWhisper(
 
   const tmpFile = path.join(os.tmpdir(), `yt_audio_${videoId}_${Date.now()}.m4a`);
   try {
-    // 1. Download lightweight audio track with fast failover
+    // 1. Download lightweight audio track with fast failover (skipped instantly on environments without Python)
     await execFileAsync(
       'python',
       [
@@ -274,12 +266,10 @@ async function transcribeYouTubeAudioViaWhisper(
     if (!fs.existsSync(tmpFile)) return null;
 
     // 2. Transcribe via Groq / OpenAI Whisper
-    const httpsAgent = new https.Agent({ keepAlive: false, timeout: 60000 });
     const isGroq = Boolean(process.env.GROQ_API_KEY);
     const client = new OpenAI({
       apiKey,
       baseURL: isGroq ? 'https://api.groq.com/openai/v1' : undefined,
-      httpAgent: httpsAgent,
       maxRetries: 2,
       timeout: 60000,
     });

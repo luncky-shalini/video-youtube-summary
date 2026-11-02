@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import { exportSynopsisPdf, exportTranscriptPdf, decodeHtmlEntities } from '@/lib/pdfGenerator';
 import { normalizeSpeakerLabel } from '@/lib/speakerUtils';
-import { extractAudioFromVideoFile } from '@/lib/audioExtractor';
+import { extractAudioChunksFromVideo, extractAudioFromVideoFile, type AudioChunk } from '@/lib/audioExtractor';
 
 declare global {
   interface Window {
@@ -445,60 +445,98 @@ export function VideoSubtitleStudio() {
     }
   };
 
-  // Transcription trigger with client-side audio optimization and resilient retry
+  // Transcription trigger with client-side audio optimization and resilient chunking
   const triggerTranscription = async (file: File) => {
     setIsTranscribing(true);
     setTranslationError(null);
     try {
-      const formData = new FormData();
+      let combinedCues: SubtitleCue[] = [];
+      let detectedLang = 'English';
 
-      // Optimize upload by extracting lightweight 16kHz audio track client-side
-      let payloadFile: Blob | File = file;
-      let payloadName = file.name;
-
+      // 1. Optimize upload by extracting lightweight 12kHz audio chunks client-side (each strictly <= 2.2MB)
+      let chunks: AudioChunk[] | null = null;
       try {
-        const audioBlob = await extractAudioFromVideoFile(file);
-        if (audioBlob) {
-          payloadFile = audioBlob;
-          payloadName = 'audio.wav';
-        }
+        chunks = await extractAudioChunksFromVideo(file);
       } catch (extractErr) {
-        console.warn('Audio extraction error, using direct video upload:', extractErr);
+        console.warn('Audio chunk extraction notice:', extractErr);
       }
 
-      formData.append('file', payloadFile, payloadName);
+      if (chunks && chunks.length > 0) {
+        for (let i = 0; i < chunks.length; i++) {
+          const chunk = chunks[i];
+          const formData = new FormData();
+          formData.append('file', chunk.blob, `audio_chunk_${i}.wav`);
+          formData.append('startOffset', chunk.startOffset.toString());
 
-      const res = await fetch('/api/subtitles/transcribe', {
-        method: 'POST',
-        body: formData,
-      });
+          const res = await fetch('/api/subtitles/transcribe', {
+            method: 'POST',
+            body: formData,
+          });
 
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const errorMsg = sanitizeErrorMessage(
-          data?.error,
-          'Video transcription failed. Please check your network and try again, or use a YouTube URL.'
-        );
-        setTranslationError(errorMsg);
-        return;
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            throw new Error(
+              data?.error ||
+                'Transcription service request failed. Please check your network and try again.'
+            );
+          }
+
+          if (i === 0 && data.language) {
+            detectedLang = data.language;
+          }
+
+          const chunkCues: SubtitleCue[] = data.cues || [];
+          for (const cue of chunkCues) {
+            combinedCues.push({
+              ...cue,
+              id: combinedCues.length + 1,
+            });
+          }
+        }
+      } else {
+        // Fallback: direct file upload if <= 4MB
+        if (file.size > 4.2 * 1024 * 1024) {
+          throw new Error(
+            `Video file size (${(file.size / (1024 * 1024)).toFixed(1)}MB) exceeds direct serverless upload limit. Please use a clip under 4MB, or a YouTube URL.`
+          );
+        }
+
+        const formData = new FormData();
+        formData.append('file', file, file.name);
+
+        const res = await fetch('/api/subtitles/transcribe', {
+          method: 'POST',
+          body: formData,
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(
+            data?.error ||
+              'Video transcription failed. Please check your network and try again, or use a YouTube URL.'
+          );
+        }
+
+        combinedCues = data.cues || [];
+        if (data.language) detectedLang = data.language;
       }
 
-      const cues: SubtitleCue[] = data.cues || [];
-      const detectedLang = data.language || 'English';
+      if (combinedCues.length === 0) {
+        throw new Error('No speech or dialogue could be detected in this video.');
+      }
+
       setOriginalLanguage(detectedLang);
       setSelectedSubtitleLanguage(detectedLang);
       setSelectedLanguage(detectedLang);
       setActiveSubtitleLanguage(detectedLang);
-      setOriginalSubtitles(cues);
-      setOriginalTranscript(cues);
+      setOriginalSubtitles(combinedCues);
+      setOriginalTranscript(combinedCues);
       setTranslatedSubtitles({});
       setOriginalSynopsis(null);
 
       // Automatically fetch full synopsis in original language
-      if (cues.length > 0) {
-        const dur = videoRef.current?.duration || Math.max(...cues.map((c) => c.end), 0);
-        fetchSynopsisForVideo(payloadName, detectedLang, cues, dur, 'Local Video File');
-      }
+      const dur = videoRef.current?.duration || Math.max(...combinedCues.map((c) => c.end), 0);
+      fetchSynopsisForVideo(file.name, detectedLang, combinedCues, dur, 'Local Video File');
     } catch (err) {
       setTranslationError(
         sanitizeErrorMessage(
@@ -1222,6 +1260,9 @@ export function VideoSubtitleStudio() {
               <div className="rounded-2xl border border-slate-200/80 bg-white/80 p-5 shadow-xs dark:border-slate-800 dark:bg-slate-900/70">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                   <h3 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-200">
+                    <span className="flex h-5 w-5 items-center justify-center rounded-md bg-sky-600 text-[11px] font-extrabold text-white">
+                      2
+                    </span>
                     <Film className="h-4 w-4 text-teal-500" />
                     <span>Video Overview / Video Details</span>
                   </h3>
@@ -1323,13 +1364,13 @@ export function VideoSubtitleStudio() {
                 </div>
               )}
 
-              {/* ── 2. Detailed Synopsis (ALWAYS IN ENGLISH) ── */}
+              {/* ── 3. Detailed Synopsis (ALWAYS IN ENGLISH) ── */}
               {original_synopsis?.detailedSynopsis && (
                 <div className="rounded-2xl border border-slate-200/80 bg-white/80 p-5 shadow-xs dark:border-slate-800 dark:bg-slate-900/70">
                   <div className="mb-3 flex items-center justify-between">
                     <h3 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-200">
                       <span className="flex h-5 w-5 items-center justify-center rounded-md bg-sky-600 text-[11px] font-extrabold text-white">
-                        2
+                        3
                       </span>
                       <BookOpen className="h-3.5 w-3.5 text-sky-500" />
                       <span>Detailed Synopsis</span>
@@ -1342,13 +1383,13 @@ export function VideoSubtitleStudio() {
                 </div>
               )}
 
-              {/* ── 3. Key Topics Covered (ALWAYS IN ENGLISH) ── */}
+              {/* ── 4. Key Topics Covered (ALWAYS IN ENGLISH) ── */}
               {original_synopsis && (original_synopsis.keyTopicsCovered || original_synopsis.keyTopics) && (
                 <div className="rounded-2xl border border-slate-200/80 bg-white/80 p-5 shadow-xs dark:border-slate-800 dark:bg-slate-900/70">
                   <div className="mb-3 flex items-center justify-between">
                     <h3 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-200">
                       <span className="flex h-5 w-5 items-center justify-center rounded-md bg-teal-600 text-[11px] font-extrabold text-white">
-                        3
+                        4
                       </span>
                       <ListChecks className="h-3.5 w-3.5 text-teal-500" />
                       <span>Key Topics Covered</span>
@@ -1370,25 +1411,6 @@ export function VideoSubtitleStudio() {
                         </p>
                       </div>
                     ))}
-                  </div>
-                </div>
-              )}
-
-              {/* ── 4. Outcomes & Conclusions (ALWAYS IN ENGLISH) ── */}
-              {original_synopsis && (original_synopsis.outcomesAndConclusions || original_synopsis.conclusion) && (
-                <div className="rounded-2xl border border-slate-200/80 bg-white/80 p-5 shadow-xs dark:border-slate-800 dark:bg-slate-900/70">
-                  <div className="mb-3 flex items-center justify-between">
-                    <h3 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-200">
-                      <span className="flex h-5 w-5 items-center justify-center rounded-md bg-sky-600 text-[11px] font-extrabold text-white">
-                        4
-                      </span>
-                      <CheckCircle2 className="h-3.5 w-3.5 text-sky-500" />
-                      <span>Outcomes & Conclusions</span>
-                    </h3>
-                    <span className="text-[11px] font-bold text-sky-600 dark:text-sky-400">English</span>
-                  </div>
-                  <div className="rounded-xl border border-sky-500/20 bg-sky-50/50 p-4 text-xs font-medium text-sky-950 leading-relaxed dark:bg-sky-950/30 dark:text-sky-200">
-                    {decodeHtmlEntities(original_synopsis.outcomesAndConclusions || original_synopsis.conclusion || '')}
                   </div>
                 </div>
               )}
@@ -1509,6 +1531,25 @@ export function VideoSubtitleStudio() {
                   </div>
                 </div>
               </div>
+
+              {/* ── 7. Outcomes & Conclusions (ALWAYS IN ENGLISH) ── */}
+              {original_synopsis && (original_synopsis.outcomesAndConclusions || original_synopsis.conclusion) && (
+                <div className="rounded-2xl border border-slate-200/80 bg-white/80 p-5 shadow-xs dark:border-slate-800 dark:bg-slate-900/70">
+                  <div className="mb-3 flex items-center justify-between">
+                    <h3 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-200">
+                      <span className="flex h-5 w-5 items-center justify-center rounded-md bg-teal-600 text-[11px] font-extrabold text-white">
+                        7
+                      </span>
+                      <CheckCircle2 className="h-3.5 w-3.5 text-teal-500" />
+                      <span>Outcomes & Conclusions</span>
+                    </h3>
+                    <span className="text-[11px] font-bold text-teal-600 dark:text-teal-400">English</span>
+                  </div>
+                  <div className="rounded-xl border border-teal-500/20 bg-teal-50/50 p-4 text-xs font-medium text-teal-950 leading-relaxed dark:bg-teal-950/30 dark:text-teal-200">
+                    {decodeHtmlEntities(original_synopsis.outcomesAndConclusions || original_synopsis.conclusion || '')}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

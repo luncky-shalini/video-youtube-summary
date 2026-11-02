@@ -75,6 +75,98 @@ function formatTime(seconds: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
+function hasNonLatinCharacters(text: string): boolean {
+  if (!text) return false;
+  // Matches Indic scripts (Telugu, Hindi, Tamil, Kannada, Malayalam, Bengali, etc.),
+  // CJK, Hangul, Arabic, Cyrillic, Thai, etc.
+  return /[\u0C00-\u0C7F\u0900-\u097F\u0B80-\u0BFF\u0C80-\u0CFF\u0D00-\u0D7F\u0980-\u09FF\u0A80-\u0AFF\u4E00-\u9FFF\u3040-\u30FF\uAC00-\uD7AF\u0600-\u06FF\u0400-\u04FF\u0E00-\u0E7F]/.test(
+    text
+  );
+}
+
+async function ensureEnglishSynopsisSections(
+  fields: {
+    executiveSummary: string;
+    videoOverview: string;
+    detailedSynopsis: string;
+    keyTopicsCovered: KeyTopicItem[];
+    outcomesAndConclusions: string;
+  },
+  provider: Provider,
+  origLang: string
+): Promise<{
+  executiveSummary: string;
+  videoOverview: string;
+  detailedSynopsis: string;
+  keyTopicsCovered: KeyTopicItem[];
+  outcomesAndConclusions: string;
+}> {
+  const needsTranslation =
+    hasNonLatinCharacters(fields.executiveSummary) ||
+    hasNonLatinCharacters(fields.videoOverview) ||
+    hasNonLatinCharacters(fields.detailedSynopsis) ||
+    hasNonLatinCharacters(fields.outcomesAndConclusions) ||
+    fields.keyTopicsCovered.some((t) => hasNonLatinCharacters(t.topic) || hasNonLatinCharacters(t.summary));
+
+  if (!needsTranslation) {
+    return fields;
+  }
+
+  try {
+    const translatePrompt = `You are a professional multilingual translator.
+Translate each of the following sections of a video synopsis from ${origLang} into clear, fluent, professional ENGLISH.
+Maintain the exact structure and factual meaning.
+
+Input Data:
+${JSON.stringify(fields, null, 2)}
+
+CRITICAL: Respond ONLY with a valid JSON object matching the exact input structure, with all text translated to ENGLISH:
+{
+  "executiveSummary": "...",
+  "videoOverview": "...",
+  "detailedSynopsis": "...",
+  "keyTopicsCovered": [
+    { "topic": "...", "summary": "..." }
+  ],
+  "outcomesAndConclusions": "..."
+}`;
+
+    const res = await provider.client.chat.completions.create({
+      model: provider.model,
+      messages: [
+        {
+          role: 'system',
+          content: 'You are an expert translator. Output valid JSON only with all values in fluent English.',
+        },
+        { role: 'user', content: translatePrompt },
+      ],
+      response_format: { type: 'json_object' },
+      temperature: 0.1,
+    });
+
+    const parsed = extractJsonObject(res.choices[0]?.message?.content || '');
+    if (parsed) {
+      return {
+        executiveSummary: String(parsed.executiveSummary || fields.executiveSummary),
+        videoOverview: String(parsed.videoOverview || fields.videoOverview),
+        detailedSynopsis: String(parsed.detailedSynopsis || fields.detailedSynopsis),
+        keyTopicsCovered:
+          Array.isArray(parsed.keyTopicsCovered) && parsed.keyTopicsCovered.length > 0
+            ? (parsed.keyTopicsCovered as any[]).map((t: any) => ({
+                topic: String(t.topic || 'Key Topic'),
+                summary: String(t.summary || ''),
+              }))
+            : fields.keyTopicsCovered,
+        outcomesAndConclusions: String(parsed.outcomesAndConclusions || fields.outcomesAndConclusions),
+      };
+    }
+  } catch (err) {
+    console.warn('Synopsis English normalization notice:', err);
+  }
+
+  return fields;
+}
+
 /** Clean JSON extractor from AI completion text */
 function extractJsonObject(text: string): Record<string, unknown> | null {
   const trimmed = text.trim();
@@ -389,26 +481,39 @@ CRITICAL LANGUAGE RULES:
               }))
             : [{ speaker: 'Speaker 1', dialogue: cues[0]?.text || title }];
 
+        // Guarantee that the 5 required sections are ALWAYS in English
+        const englishSections = await ensureEnglishSynopsisSections(
+          {
+            executiveSummary,
+            videoOverview,
+            detailedSynopsis,
+            keyTopicsCovered,
+            outcomesAndConclusions,
+          },
+          provider,
+          origLang
+        );
+
         return {
           title,
           originalLanguage: origLang,
           language: origLang,
           durationFormatted,
           sourceType,
-          executiveSummary,
-          videoOverview,
-          detailedSynopsis,
-          keyTopicsCovered,
-          outcomesAndConclusions,
+          executiveSummary: englishSections.executiveSummary,
+          videoOverview: englishSections.videoOverview,
+          detailedSynopsis: englishSections.detailedSynopsis,
+          keyTopicsCovered: englishSections.keyTopicsCovered,
+          outcomesAndConclusions: englishSections.outcomesAndConclusions,
           keyMomentsTimeline,
           charactersSpeakersDialogue,
           // Compatibility aliases
-          overview: videoOverview,
-          shortDescription: executiveSummary,
-          introduction: executiveSummary,
-          keyTopics: keyTopicsCovered,
-          keyPoints: keyTopicsCovered.map((t) => t.summary),
-          conclusion: outcomesAndConclusions,
+          overview: englishSections.videoOverview,
+          shortDescription: englishSections.executiveSummary,
+          introduction: englishSections.executiveSummary,
+          keyTopics: englishSections.keyTopicsCovered,
+          keyPoints: englishSections.keyTopicsCovered.map((t) => t.summary),
+          conclusion: englishSections.outcomesAndConclusions,
           cues,
         };
       }

@@ -2,7 +2,6 @@ import { isNetworkError } from '@/lib/network';
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { toFile } from 'openai/uploads';
-import https from 'node:https';
 
 export const maxDuration = 120;
 export const dynamic = 'force-dynamic';
@@ -61,6 +60,8 @@ export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
     const file = formData.get('file') as File | null;
+    const rawOffset = formData.get('startOffset');
+    const startOffset = rawOffset ? Math.max(0, parseFloat(String(rawOffset)) || 0) : 0;
 
     if (!file) {
       return NextResponse.json(
@@ -97,18 +98,13 @@ export async function POST(req: NextRequest) {
     }
 
     const isGroq = Boolean(process.env.GROQ_API_KEY);
-    const httpsAgent = new https.Agent({
-      keepAlive: false, // Fresh socket per request to prevent stale keep-alive socket drops
-      timeout: 120000,
-    });
 
     const client = new OpenAI({
       apiKey,
       baseURL: isGroq
         ? 'https://api.groq.com/openai/v1'
         : process.env.OPENAI_BASE_URL || undefined,
-      httpAgent: httpsAgent,
-      maxRetries: 1,
+      maxRetries: 2,
       timeout: 120000,
     });
 
@@ -159,7 +155,6 @@ export async function POST(req: NextRequest) {
         const fallbackClient = new OpenAI({
           apiKey: process.env.OPENAI_API_KEY,
           baseURL: process.env.OPENAI_BASE_URL || undefined,
-          httpAgent: httpsAgent,
           maxRetries: 1,
           timeout: 60000,
         });
@@ -190,8 +185,8 @@ export async function POST(req: NextRequest) {
       ? segments
           .map((seg: any, idx: number) => ({
             id: idx + 1,
-            start: Math.round(Number(seg.start) * 10) / 10,
-            end: Math.round(Number(seg.end) * 10) / 10,
+            start: Math.round((Number(seg.start || 0) + startOffset) * 10) / 10,
+            end: Math.round((Number(seg.end || seg.start + 2) + startOffset) * 10) / 10,
             text: decodeHtmlEntities(String(seg.text || '').trim()),
           }))
           .filter((c: SubtitleCue) => c.text.length > 0)
@@ -202,8 +197,8 @@ export async function POST(req: NextRequest) {
       if (typeof transcriptionResult?.text === 'string' && transcriptionResult.text.trim()) {
         cues.push({
           id: 1,
-          start: 0.0,
-          end: 10.0,
+          start: Math.round(startOffset * 10) / 10,
+          end: Math.round((startOffset + 10.0) * 10) / 10,
           text: decodeHtmlEntities(transcriptionResult.text.trim()),
         });
       } else {
