@@ -691,9 +691,12 @@ export async function POST(req: NextRequest) {
         }
       } catch (transcriptError: any) {
         const msg = String(transcriptError?.message || '');
-        if (msg.includes('unavailable') || msg.includes('does not exist')) {
-          isUnavailable = true;
-        } else if (msg.includes('TooManyRequest') || msg.includes('429')) {
+        // youtube-transcript reports "video unavailable" when its HTML scraper
+        // cannot find YouTube's player payload. On serverless IPs this can also
+        // mean YouTube served a consent/bot-check page, so don't treat that as
+        // proof that the video itself is restricted. The watch-page fallback
+        // below can confirm a real playabilityStatus.
+        if (msg.includes('TooManyRequest') || msg.includes('429')) {
           isThrottled = true;
         }
       }
@@ -716,7 +719,8 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Check restrictions
+    // Only report a restricted video when YouTube's player response confirmed
+    // a non-OK playability status. Scraper errors alone are ambiguous on Vercel.
     if (isUnavailable) {
       return NextResponse.json(
         {
