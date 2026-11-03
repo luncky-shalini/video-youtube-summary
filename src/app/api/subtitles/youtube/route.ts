@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { YoutubeTranscript } from 'youtube-transcript';
 import type { SubtitleCue } from '../translate/route';
 import OpenAI from 'openai';
+import { toFile } from 'openai/uploads';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -599,8 +600,83 @@ async function fetchCaptionsViaWatchPage(
 }
 
 /**
- * Tertiary fallback for YouTube videos without uploaded subtitles/closed captions.
- * Downloads lightweight audio stream and transcribes speech using Whisper AI.
+ * Direct audio stream extractor via InnerTube Player API.
+ * Bypasses the need for Python or yt-dlp binary, running 100% inside Vercel Serverless Functions.
+ */
+async function downloadYouTubeAudioBuffer(videoId: string): Promise<Buffer | null> {
+  const clientConfigs = [
+    {
+      clientName: 'ANDROID',
+      clientVersion: '20.10.38',
+      androidSdkVersion: 34,
+      userAgent: 'com.google.android.youtube/20.10.38 (Linux; U; Android 14)',
+    },
+    {
+      clientName: 'IOS',
+      clientVersion: '19.45.4',
+      userAgent: 'com.google.ios.youtube/19.45.4 (iPhone16,2; U; CPU iOS 18_1 like Mac OS X; en_US)',
+    },
+  ];
+
+  for (const cfg of clientConfigs) {
+    try {
+      const res = await fetch('https://www.youtube.com/youtubei/v1/player', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': cfg.userAgent,
+        },
+        body: JSON.stringify({
+          context: {
+            client: {
+              clientName: cfg.clientName,
+              clientVersion: cfg.clientVersion,
+              androidSdkVersion: (cfg as any).androidSdkVersion,
+              hl: 'en',
+              gl: 'US',
+            },
+          },
+          videoId,
+        }),
+        signal: AbortSignal.timeout(6000),
+      });
+
+      if (!res.ok) continue;
+      const data = await res.json();
+      const adaptive = data?.streamingData?.adaptiveFormats || [];
+      const audioFormats = adaptive.filter((f: any) => f.mimeType && f.mimeType.startsWith('audio/') && f.url);
+      if (audioFormats.length === 0) continue;
+
+      // Prefer itag 140 or 139 (m4a/aac) or first available audio stream
+      const bestAudio =
+        audioFormats.find((f: any) => f.itag === 140 || f.itag === 139) || audioFormats[0];
+
+      if (!bestAudio?.url) continue;
+
+      const audioRes = await fetch(bestAudio.url, {
+        headers: {
+          'User-Agent': cfg.userAgent,
+        },
+        signal: AbortSignal.timeout(15000),
+      });
+
+      if (!audioRes.ok) continue;
+      const arrayBuf = await audioRes.arrayBuffer();
+      if (arrayBuf.byteLength > 1000) {
+        return Buffer.from(arrayBuf);
+      }
+    } catch (err) {
+      console.warn(`InnerTube audio stream notice (${cfg.clientName}):`, err);
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Tertiary speech-to-text fallback for YouTube videos without closed captions (e.g. Shorts/Reels).
+ * 1. Downloads lightweight audio stream directly in Node.js (0 system dependencies, works on Vercel).
+ * 2. Transcribes spoken speech and detects true original language using Whisper AI.
  */
 async function transcribeYouTubeAudioViaWhisper(
   videoId: string
@@ -608,33 +684,45 @@ async function transcribeYouTubeAudioViaWhisper(
   const apiKey = process.env.GROQ_API_KEY || process.env.OPENAI_API_KEY;
   if (!apiKey) return null;
 
-  const tmpFile = path.join(os.tmpdir(), `yt_audio_${videoId}_${Date.now()}.m4a`);
   try {
-    // 1. Download lightweight audio track with fast failover (skipped instantly on environments without Python)
-    await execFileAsync(
-      'python',
-      [
-        '-m',
-        'yt_dlp',
-        '--no-playlist',
-        '--max-filesize',
-        '25m',
-        '--socket-timeout',
-        '6',
-        '--retries',
-        '1',
-        '-f',
-        'ba[ext=m4a]/ba[ext=mp3]/ba',
-        '-o',
-        tmpFile,
-        `https://www.youtube.com/watch?v=${videoId}`,
-      ],
-      { timeout: 12000 }
-    );
+    let audioBuffer: Buffer | null = await downloadYouTubeAudioBuffer(videoId);
 
-    if (!fs.existsSync(tmpFile)) return null;
+    // If pure Node.js direct stream was unavailable, fallback to python/yt-dlp if on local environment
+    if (!audioBuffer) {
+      const tmpFile = path.join(os.tmpdir(), `yt_audio_${videoId}_${Date.now()}.m4a`);
+      try {
+        await execFileAsync(
+          'python',
+          [
+            '-m',
+            'yt_dlp',
+            '--no-playlist',
+            '--max-filesize',
+            '25m',
+            '--socket-timeout',
+            '6',
+            '--retries',
+            '1',
+            '-f',
+            'ba[ext=m4a]/ba[ext=mp3]/ba',
+            '-o',
+            tmpFile,
+            `https://www.youtube.com/watch?v=${videoId}`,
+          ],
+          { timeout: 12000 }
+        );
+        if (fs.existsSync(tmpFile)) {
+          audioBuffer = fs.readFileSync(tmpFile);
+          try {
+            fs.unlinkSync(tmpFile);
+          } catch {}
+        }
+      } catch {}
+    }
 
-    // 2. Transcribe via Groq / OpenAI Whisper
+    if (!audioBuffer || audioBuffer.length === 0) return null;
+
+    // Transcribe via Groq / OpenAI Whisper
     const isGroq = Boolean(process.env.GROQ_API_KEY);
     const client = new OpenAI({
       apiKey,
@@ -643,9 +731,13 @@ async function transcribeYouTubeAudioViaWhisper(
       timeout: 60000,
     });
 
-    const model = isGroq ? 'whisper-large-v3' : 'whisper-1';
+    const uploadableFile = await toFile(audioBuffer, 'youtube_audio.m4a', {
+      type: 'audio/mp4',
+    });
+
+    const model = isGroq ? 'whisper-large-v3-turbo' : 'whisper-1';
     const transcription: any = await client.audio.transcriptions.create({
-      file: fs.createReadStream(tmpFile),
+      file: uploadableFile,
       model,
       response_format: 'verbose_json',
       temperature: 0.1,
@@ -674,11 +766,8 @@ async function transcribeYouTubeAudioViaWhisper(
     }
   } catch (err) {
     console.warn('YouTube Whisper audio fallback notice:', err);
-  } finally {
-    try {
-      if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
-    } catch {}
   }
+
   return null;
 }
 
@@ -923,13 +1012,17 @@ async function detectAndNormalizeYouTubeCues(params: {
 
   const isTransliteratedASR = scriptLanguage === 'Hindi' && isLikelyEnglishVideo;
 
-  if (scriptLanguage && scriptLanguage !== 'Hindi' && !isTransliteratedASR) {
+  const isNativeLanguage =
+    Boolean(scriptLanguage && scriptLanguage !== 'Hindi') ||
+    ['Tamil', 'Telugu', 'Kannada', 'Malayalam', 'Marathi', 'Bengali', 'Gujarati', 'Punjabi', 'Urdu', 'Korean', 'Japanese', 'Chinese'].includes(reportedLangName);
+
+  if (isNativeLanguage && !isTransliteratedASR) {
     const cleanedCues = cues
       .map((c) => ({ ...c, text: cleanNoiseTokens(c.text) }))
       .filter((c) => c.text.length > 0 && !/^\[.*?\]$/.test(c.text));
     return {
       cues: cleanedCues.length > 0 ? cleanedCues : cues,
-      sourceLanguage: scriptLanguage,
+      sourceLanguage: scriptLanguage || reportedLangName,
     };
   }
 
