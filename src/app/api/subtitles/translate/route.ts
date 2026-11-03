@@ -32,8 +32,16 @@ const LANGUAGE_NAMES: Record<string, string> = {
   gu: 'Gujarati',
   pa: 'Punjabi',
   ur: 'Urdu',
+  tamil: 'Tamil',
   telugu: 'Telugu',
   hindi: 'Hindi',
+  kannada: 'Kannada',
+  malayalam: 'Malayalam',
+  marathi: 'Marathi',
+  bengali: 'Bengali',
+  gujarati: 'Gujarati',
+  punjabi: 'Punjabi',
+  urdu: 'Urdu',
   chinese: 'Chinese (Simplified)',
   korean: 'Korean',
   english: 'English',
@@ -41,6 +49,10 @@ const LANGUAGE_NAMES: Record<string, string> = {
   french: 'French',
   german: 'German',
   japanese: 'Japanese',
+  russian: 'Russian',
+  portuguese: 'Portuguese',
+  italian: 'Italian',
+  arabic: 'Arabic',
 };
 
 function getAIClient() {

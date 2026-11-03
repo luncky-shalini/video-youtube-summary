@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, ChangeEvent } from 'react';
+import { useState, useRef, useEffect, useMemo, ChangeEvent } from 'react';
 import {
   Upload,
   Subtitles,
@@ -41,16 +41,106 @@ export interface SubtitleCue {
   speaker?: string;
 }
 
+export function normalizeLanguageName(input?: string): string {
+  if (!input) return 'English';
+  const trimmed = input.trim();
+  const lower = trimmed.toLowerCase().split('-')[0].split('(')[0].trim();
+
+  const map: Record<string, string> = {
+    ta: 'Tamil',
+    tam: 'Tamil',
+    tamil: 'Tamil',
+    te: 'Telugu',
+    tel: 'Telugu',
+    telugu: 'Telugu',
+    hi: 'Hindi',
+    hin: 'Hindi',
+    hindi: 'Hindi',
+    en: 'English',
+    eng: 'English',
+    english: 'English',
+    kn: 'Kannada',
+    kan: 'Kannada',
+    kannada: 'Kannada',
+    ml: 'Malayalam',
+    mal: 'Malayalam',
+    malayalam: 'Malayalam',
+    mr: 'Marathi',
+    mar: 'Marathi',
+    marathi: 'Marathi',
+    bn: 'Bengali',
+    ben: 'Bengali',
+    bengali: 'Bengali',
+    gu: 'Gujarati',
+    guj: 'Gujarati',
+    gujarati: 'Gujarati',
+    pa: 'Punjabi',
+    pan: 'Punjabi',
+    punjabi: 'Punjabi',
+    ur: 'Urdu',
+    urd: 'Urdu',
+    urdu: 'Urdu',
+    zh: 'Chinese',
+    chi: 'Chinese',
+    zho: 'Chinese',
+    chinese: 'Chinese',
+    ko: 'Korean',
+    kor: 'Korean',
+    korean: 'Korean',
+    ja: 'Japanese',
+    jpn: 'Japanese',
+    japanese: 'Japanese',
+    es: 'Spanish',
+    spa: 'Spanish',
+    spanish: 'Spanish',
+    fr: 'French',
+    fra: 'French',
+    fre: 'French',
+    french: 'French',
+    de: 'German',
+    deu: 'German',
+    ger: 'German',
+    german: 'German',
+    ru: 'Russian',
+    rus: 'Russian',
+    russian: 'Russian',
+    pt: 'Portuguese',
+    por: 'Portuguese',
+    portuguese: 'Portuguese',
+    it: 'Italian',
+    ita: 'Italian',
+    italian: 'Italian',
+    ar: 'Arabic',
+    ara: 'Arabic',
+    arabic: 'Arabic',
+  };
+
+  if (map[lower]) return map[lower];
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+}
+
 export const SUPPORTED_LANGUAGES = [
-  { code: 'English', label: 'English' },
+  { code: 'Tamil', label: 'Tamil (தமிழ்)' },
   { code: 'Telugu', label: 'Telugu (తెలుగు)' },
   { code: 'Hindi', label: 'Hindi (हिन्दी)' },
+  { code: 'English', label: 'English' },
+  { code: 'Kannada', label: 'Kannada (ಕನ್ನಡ)' },
+  { code: 'Malayalam', label: 'Malayalam (മലയാളം)' },
+  { code: 'Marathi', label: 'Marathi (मराठी)' },
+  { code: 'Bengali', label: 'Bengali (বাংলা)' },
+  { code: 'Gujarati', label: 'Gujarati (ગુજરાતી)' },
+  { code: 'Punjabi', label: 'Punjabi (ਪੰਜਾਬੀ)' },
+  { code: 'Urdu', label: 'Urdu (اردو)' },
   { code: 'Chinese', label: 'Chinese (中文)' },
   { code: 'Korean', label: 'Korean (한국어)' },
+  { code: 'Japanese', label: 'Japanese (日本語)' },
   { code: 'Spanish', label: 'Spanish (Español)' },
   { code: 'French', label: 'French (Français)' },
   { code: 'German', label: 'German (Deutsch)' },
-  { code: 'Japanese', label: 'Japanese (日本語)' },
+  { code: 'Russian', label: 'Russian (Русский)' },
+  { code: 'Portuguese', label: 'Portuguese (Português)' },
+  { code: 'Italian', label: 'Italian (Italiano)' },
+  { code: 'Arabic', label: 'Arabic (العربية)' },
 ];
 
 const SUPPORTED_EXTENSIONS = ['.mp4', '.webm', '.ogg', '.mov', '.mkv'];
@@ -172,9 +262,9 @@ export function VideoSubtitleStudio() {
 
   // Subtitle state
   // ── Requirement 8: Independent State Variables ─────────────────────────
-  const [original_language, setOriginalLanguage] = useState<string>('English');
-  const [selected_subtitle_language, setSelectedSubtitleLanguage] = useState<string>('English');
-  const [active_subtitle_language, setActiveSubtitleLanguage] = useState<string>('English');
+  const [original_language, setOriginalLanguage] = useState<string>('');
+  const [selected_subtitle_language, setSelectedSubtitleLanguage] = useState<string>('');
+  const [active_subtitle_language, setActiveSubtitleLanguage] = useState<string>('');
   const [original_subtitles, setOriginalSubtitles] = useState<SubtitleCue[]>([]);
   const [translated_subtitles, setTranslatedSubtitles] = useState<Record<string, SubtitleCue[]>>({});
   const [original_transcript, setOriginalTranscript] = useState<SubtitleCue[]>([]);
@@ -189,9 +279,23 @@ export function VideoSubtitleStudio() {
   const setActiveLanguage = setActiveSubtitleLanguage;
 
   const cuesByLanguage: Record<string, SubtitleCue[]> = {
-    [original_language]: original_subtitles,
+    [original_language || 'Original']: original_subtitles,
     ...translated_subtitles,
   };
+
+  // Dynamic available languages list: guaranteed to include detected original language
+  const availableLanguages = useMemo(() => {
+    const list = [...SUPPORTED_LANGUAGES];
+    const canonicalOriginal = original_language ? normalizeLanguageName(original_language) : '';
+    if (canonicalOriginal && !list.some((l) => l.code.toLowerCase() === canonicalOriginal.toLowerCase())) {
+      list.unshift({ code: canonicalOriginal, label: `${canonicalOriginal} (Original)` });
+    }
+    const canonicalSelected = selected_subtitle_language ? normalizeLanguageName(selected_subtitle_language) : '';
+    if (canonicalSelected && !list.some((l) => l.code.toLowerCase() === canonicalSelected.toLowerCase())) {
+      list.push({ code: canonicalSelected, label: canonicalSelected });
+    }
+    return list;
+  }, [original_language, selected_subtitle_language]);
   const [isCcOn, setIsCcOn] = useState<boolean>(true);
   const [currentTime, setCurrentTime] = useState<number>(0);
 
@@ -509,7 +613,7 @@ export function VideoSubtitleStudio() {
     setTranslationError(null);
     try {
       let combinedCues: SubtitleCue[] = [];
-      let detectedLang = 'English';
+      let detectedLang = '';
 
       // 1. Optimize upload by extracting lightweight 12kHz audio chunks client-side (each strictly <= 2.2MB)
       let chunks: AudioChunk[] | null = null;
@@ -533,7 +637,7 @@ export function VideoSubtitleStudio() {
 
           const data = await res.json().catch(() => ({}));
           if (res.ok && data) {
-            if (data.language && detectedLang === 'English') {
+            if (data.language && !detectedLang) {
               detectedLang = data.language;
             }
 
@@ -580,10 +684,12 @@ export function VideoSubtitleStudio() {
         throw new Error('No speech or dialogue could be detected in this video.');
       }
 
-      setOriginalLanguage(detectedLang);
-      setSelectedSubtitleLanguage(detectedLang);
-      setSelectedLanguage(detectedLang);
-      setActiveSubtitleLanguage(detectedLang);
+      const canonicalDetected = normalizeLanguageName(detectedLang || 'English');
+
+      setOriginalLanguage(canonicalDetected);
+      setSelectedSubtitleLanguage(canonicalDetected);
+      setSelectedLanguage(canonicalDetected);
+      setActiveSubtitleLanguage(canonicalDetected);
       setOriginalSubtitles(combinedCues);
       setOriginalTranscript(combinedCues);
       setTranslatedSubtitles({});
@@ -591,7 +697,7 @@ export function VideoSubtitleStudio() {
 
       // Automatically fetch full synopsis in original language
       const dur = videoRef.current?.duration || Math.max(...combinedCues.map((c) => c.end), 0);
-      fetchSynopsisForVideo(file.name, detectedLang, combinedCues, dur, 'Local Video File');
+      fetchSynopsisForVideo(file.name, canonicalDetected, combinedCues, dur, 'Local Video File');
     } catch (err) {
       setTranslationError(
         sanitizeErrorMessage(
@@ -633,7 +739,9 @@ export function VideoSubtitleStudio() {
         throw new Error('No subtitles available for this YouTube video.');
       }
 
-      const detectedSource = data.sourceLanguage || 'English';
+      const rawSource = data.sourceLanguage || data.language || 'English';
+      const canonicalDetected = normalizeLanguageName(rawSource);
+
       setCurrentYouTubeId(data.videoId || '');
       setIsEmbedRestricted(Boolean(data.embedRestricted));
       setIsPlayingSimulation(false);
@@ -642,10 +750,10 @@ export function VideoSubtitleStudio() {
         simulationTimerRef.current = null;
       }
 
-      setOriginalLanguage(detectedSource);
-      setSelectedSubtitleLanguage(detectedSource);
-      setSelectedLanguage(detectedSource);
-      setActiveSubtitleLanguage(detectedSource);
+      setOriginalLanguage(canonicalDetected);
+      setSelectedSubtitleLanguage(canonicalDetected);
+      setSelectedLanguage(canonicalDetected);
+      setActiveSubtitleLanguage(canonicalDetected);
       setOriginalSubtitles(cues);
       setOriginalTranscript(cues);
       setTranslatedSubtitles({});
@@ -657,13 +765,13 @@ export function VideoSubtitleStudio() {
       setVideoSource({
         type: 'youtube',
         url: embedWithOrigin,
-        name: data.title || `YouTube: ${data.videoId} (${detectedSource})`,
+        name: data.title || `YouTube: ${data.videoId} (${canonicalDetected})`,
       });
 
       // Automatically fetch full synopsis in original language
       if (cues.length > 0) {
         const dur = Math.max(...cues.map((c) => c.end), 0);
-        fetchSynopsisForVideo(data.title || `YouTube: ${data.videoId}`, detectedSource, cues, dur, 'YouTube');
+        fetchSynopsisForVideo(data.title || `YouTube: ${data.videoId}`, canonicalDetected, cues, dur, 'YouTube');
       }
     } catch (err) {
       setUploadError(
@@ -870,9 +978,10 @@ export function VideoSubtitleStudio() {
       playerRef.current = null;
     }
     setVideoSource(null);
-    setOriginalLanguage('English');
-    setSelectedSubtitleLanguage('English');
-    setActiveSubtitleLanguage('English');
+    setOriginalLanguage('');
+    setSelectedSubtitleLanguage('');
+    setSelectedLanguage('');
+    setActiveSubtitleLanguage('');
     setOriginalSubtitles([]);
     setTranslatedSubtitles({});
     setOriginalTranscript([]);
@@ -1209,9 +1318,15 @@ export function VideoSubtitleStudio() {
                   data-testid="language-select"
                   value={selectedLanguage}
                   onChange={(e) => setSelectedLanguage(e.target.value)}
-                  className="rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-xs sm:text-sm font-bold text-slate-800 shadow-xs outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                  disabled={isTranscribing || isLoadingYoutube}
+                  className="rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-xs sm:text-sm font-bold text-slate-800 shadow-xs outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 disabled:opacity-75 disabled:cursor-not-allowed"
                 >
-                  {SUPPORTED_LANGUAGES.map((lang) => (
+                  {(!selectedLanguage || isTranscribing || isLoadingYoutube) && (
+                    <option value="" disabled>
+                      Detecting original language...
+                    </option>
+                  )}
+                  {availableLanguages.map((lang) => (
                     <option key={lang.code} value={lang.code}>
                       {lang.label}
                     </option>

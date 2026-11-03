@@ -204,7 +204,25 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const detectedLanguage = resolveLanguageName(transcriptionResult?.language);
+    let detectedLanguage = resolveLanguageName(transcriptionResult?.language);
+    const combinedCuesText = cues.slice(0, 15).map((c) => c.text).join(' ');
+    if (/[\u0B80-\u0BFF]/.test(combinedCuesText)) {
+      detectedLanguage = 'Tamil';
+    } else if (/[\u0C00-\u0C7F]/.test(combinedCuesText)) {
+      detectedLanguage = 'Telugu';
+    } else if (/[\u0C80-\u0CFF]/.test(combinedCuesText)) {
+      detectedLanguage = 'Kannada';
+    } else if (/[\u0D00-\u0D7F]/.test(combinedCuesText)) {
+      detectedLanguage = 'Malayalam';
+    } else if (/[\u0900-\u097F]/.test(combinedCuesText)) {
+      detectedLanguage = 'Hindi';
+    } else if (/[\uAC00-\uD7AF]/.test(combinedCuesText)) {
+      detectedLanguage = 'Korean';
+    } else if (/[\u3040-\u30FF]/.test(combinedCuesText)) {
+      detectedLanguage = 'Japanese';
+    } else if (/[\u4E00-\u9FFF]/.test(combinedCuesText)) {
+      detectedLanguage = 'Chinese';
+    }
 
     return NextResponse.json({
       cues,

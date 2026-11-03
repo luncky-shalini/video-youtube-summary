@@ -621,7 +621,18 @@ async function detectAndNormalizeYouTubeCues(params: {
     return { cues: [], sourceLanguage: 'English' };
   }
 
-  const reportedLangName = resolveLanguageName(detectedLangCode);
+  // 0. Instant script-level language detection
+  const sampleText = cues.slice(0, 15).map((c) => c.text).join(' ');
+  let scriptLanguage = '';
+  if (/[\u0B80-\u0BFF]/.test(sampleText)) scriptLanguage = 'Tamil';
+  else if (/[\u0C00-\u0C7F]/.test(sampleText)) scriptLanguage = 'Telugu';
+  else if (/[\u0C80-\u0CFF]/.test(sampleText)) scriptLanguage = 'Kannada';
+  else if (/[\u0D00-\u0D7F]/.test(sampleText)) scriptLanguage = 'Malayalam';
+  else if (/[\uAC00-\uD7AF]/.test(sampleText)) scriptLanguage = 'Korean';
+  else if (/[\u3040-\u30FF]/.test(sampleText)) scriptLanguage = 'Japanese';
+  else if (/[\u4E00-\u9FFF]/.test(sampleText)) scriptLanguage = 'Chinese';
+
+  const reportedLangName = scriptLanguage || resolveLanguageName(detectedLangCode);
   const aiConfig = getAIClient();
 
   // If no AI client is available, apply heuristic cleanup
@@ -645,16 +656,19 @@ Reported Caption Language Code: "${detectedLangCode}" (${reportedLangName})
 Sample Auto-Generated Cues:
 ${sampleCues.map((c, i) => `${i + 1}. ${c.text}`).join('\n')}
 
-Analyze whether the ACTUAL spoken audio in the video is English, Hindi, Telugu, or another language.
+Analyze whether the ACTUAL spoken audio in the video is Tamil, Telugu, Hindi, English, Kannada, Malayalam, or another language.
 IMPORTANT RULES:
+- If sample cues contain Tamil script characters or the video is in Tamil, actualLanguage is "Tamil".
+- If the video is in Telugu, actualLanguage is "Telugu".
+- If the video is in Kannada, actualLanguage is "Kannada".
+- If the video is in Malayalam, actualLanguage is "Malayalam".
+- If the video is truly spoken in Hindi, actualLanguage is "Hindi".
 - YouTube's automatic speech recognition (ASR) frequently transliterates Indian English audio phonetically into Devanagari Hindi script (e.g. transcribing spoken English "Today we shall learn the basics of letter writing" as Devanagari "टुडे वी शैल लर्न द बेसिक्स ऑफ लेटर राइटिंग").
 - If the video title and audio are in English (such as English cartoon classes like Suppandi, educational tutorials in English, etc.), the actualLanguage is "English".
-- If the video is in Telugu, actualLanguage is "Telugu".
-- If the video is truly spoken in Hindi, actualLanguage is "Hindi".
 
 Respond strictly with a JSON object:
 {
-  "actualLanguage": "English",
+  "actualLanguage": "${scriptLanguage || 'English'}",
   "needsNormalization": true
 }`;
 
@@ -666,7 +680,7 @@ Respond strictly with a JSON object:
     });
 
     const parsedDetection = JSON.parse(detectRes.choices[0]?.message?.content || '{}');
-    const actualLanguage = (parsedDetection.actualLanguage || reportedLangName || 'English').trim();
+    const actualLanguage = (scriptLanguage || parsedDetection.actualLanguage || reportedLangName || 'English').trim();
     const needsNormalization = Boolean(parsedDetection.needsNormalization);
 
     // 2. Normalize cues if transliterated or corrupted
