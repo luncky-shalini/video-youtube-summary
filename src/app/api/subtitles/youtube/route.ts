@@ -649,13 +649,37 @@ async function fetchTranscriptViaSupadata(
 
       const data = await res.json();
       const rawContent = data?.content || (Array.isArray(data) ? data : []);
-      const cues = parseSupadataContent(rawContent);
+      let cues = parseSupadataContent(rawContent);
+      let resolvedLang = data?.lang || preferredLang || 'en';
+
+      const availableLangs: string[] = Array.isArray(data?.availableLangs) ? data.availableLangs : [];
+      // If no preferred language was explicitly requested, and Supadata returned an arbitrary non-English track
+      // (e.g. German 'de' for an English video) while 'en' is available in availableLangs:
+      if (!preferredLang && resolvedLang !== 'en' && availableLangs.includes('en')) {
+        try {
+          const enRes = await fetch(
+            `https://api.supadata.ai/v1/youtube/transcript?url=${encodeURIComponent(videoUrl)}&lang=en`,
+            {
+              headers: { 'x-api-key': apiKey.trim(), 'Accept': 'application/json' },
+              signal: AbortSignal.timeout(10000),
+            }
+          );
+          if (enRes.ok) {
+            const enData = await enRes.json();
+            const enCues = parseSupadataContent(enData?.content);
+            if (enCues.length > 0) {
+              cues = enCues;
+              resolvedLang = 'en';
+            }
+          }
+        } catch {}
+      }
 
       if (cues.length > 0) {
         return {
           cues,
-          langCode: data?.lang || preferredLang || 'en',
-          diagnostics: { configured: true, status: 200, count: cues.length, lang: data?.lang },
+          langCode: resolvedLang,
+          diagnostics: { configured: true, status: 200, count: cues.length, lang: resolvedLang },
         };
       }
     } catch (err: any) {
