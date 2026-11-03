@@ -269,6 +269,7 @@ interface InnerTubeCaptionResult {
     lengthSeconds?: string | number;
     keywords?: string[];
   };
+  diagnostics?: any[];
 }
 
 /**
@@ -410,6 +411,7 @@ async function fetchCaptionsViaInnerTube(
 
   let lastVideoDetails: any = null;
   let lastStatus: string | undefined = undefined;
+  const diagnostics: any[] = [];
 
   for (const attempt of attempts) {
     try {
@@ -429,17 +431,28 @@ async function fetchCaptionsViaInnerTube(
         signal: AbortSignal.timeout(15000),
       });
 
-      if (!res.ok) continue;
+      if (!res.ok) {
+        diagnostics.push({ url: attempt.url, httpStatus: res.status });
+        continue;
+      }
       const data = await res.json();
       const status = data?.playabilityStatus?.status;
       if (data?.videoDetails) lastVideoDetails = data.videoDetails;
       if (status) lastStatus = status;
 
+      const captionTracks = data?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+      diagnostics.push({
+        url: attempt.url,
+        httpStatus: res.status,
+        playability: status,
+        reason: data?.playabilityStatus?.reason,
+        tracksCount: Array.isArray(captionTracks) ? captionTracks.length : 0,
+      });
+
       if (status && status !== 'OK') {
         continue;
       }
 
-      const captionTracks = data?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
       if (!Array.isArray(captionTracks) || captionTracks.length === 0) {
         continue;
       }
@@ -456,7 +469,10 @@ async function fetchCaptionsViaInnerTube(
         signal: AbortSignal.timeout(15000),
       });
 
-      if (!subRes.ok) continue;
+      if (!subRes.ok) {
+        diagnostics.push({ subUrl: chosenTrack.baseUrl.slice(0, 80), subStatus: subRes.status });
+        continue;
+      }
 
       const rawSub = await subRes.text();
       let cues: SubtitleCue[] = [];
@@ -500,14 +516,16 @@ async function fetchCaptionsViaInnerTube(
           langCode: chosenTrack.languageCode || 'en',
           videoDetails: data.videoDetails || lastVideoDetails,
           status: 'OK',
+          diagnostics,
         };
       }
     } catch (clientErr) {
+      diagnostics.push({ url: attempt.url, error: (clientErr as any)?.message });
       console.warn('InnerTube client attempt notice:', clientErr);
     }
   }
 
-  return { cues: [], langCode: 'en', status: lastStatus, videoDetails: lastVideoDetails };
+  return { cues: [], langCode: 'en', status: lastStatus, videoDetails: lastVideoDetails, diagnostics };
 }
 
 interface WatchPageResult {
@@ -1171,6 +1189,7 @@ export async function POST(req: NextRequest) {
         {
           error:
             'Could not retrieve authentic dialogue or closed captions for this YouTube video. Please ensure the video has audible speech and is publicly accessible, or upload the video file directly.',
+          diagnostics: innerTubeResult?.diagnostics,
         },
         { status: 422 }
       );
