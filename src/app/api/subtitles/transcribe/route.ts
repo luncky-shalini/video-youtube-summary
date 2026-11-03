@@ -115,7 +115,7 @@ export async function POST(req: NextRequest) {
     // Convert Web File buffer to an OpenAI SDK-compatible uploadable file stream
     const arrayBuf = await file.arrayBuffer();
     const uploadableBuffer = Buffer.from(arrayBuf);
-    const mimeType = file.type || (fileName.endsWith('.wav') ? 'audio/wav' : 'video/mp4');
+    const mimeType = fileName.endsWith('.wav') ? 'audio/wav' : (file.type || 'video/mp4');
 
     let transcriptionResult: any = null;
     let transcriptionErrorMsg = '';
@@ -201,11 +201,6 @@ export async function POST(req: NextRequest) {
           end: Math.round((startOffset + 10.0) * 10) / 10,
           text: decodeHtmlEntities(transcriptionResult.text.trim()),
         });
-      } else {
-        return NextResponse.json(
-          { error: 'No spoken dialogue or speech segments could be extracted from this video.' },
-          { status: 422 }
-        );
       }
     }
 

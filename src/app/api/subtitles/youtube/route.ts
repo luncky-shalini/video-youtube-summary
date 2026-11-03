@@ -60,14 +60,16 @@ function decodeHtmlEntities(text: string): string {
 
 function getAIClient() {
   if (process.env.GROQ_API_KEY) {
+    const client = new OpenAI({
+      apiKey: process.env.GROQ_API_KEY,
+      baseURL: 'https://api.groq.com/openai/v1',
+      maxRetries: 2,
+      timeout: 60000,
+    });
     return {
-      client: new OpenAI({
-        apiKey: process.env.GROQ_API_KEY,
-        baseURL: 'https://api.groq.com/openai/v1',
-        maxRetries: 2,
-        timeout: 60000,
-      }),
+      client,
       model: process.env.GROQ_MODEL || 'openai/gpt-oss-120b',
+      fallbackModels: ['openai/gpt-oss-120b', 'qwen/qwen3.8-27b', 'openai/gpt-oss-20b'],
     };
   }
   if (process.env.OPENAI_API_KEY) {
@@ -79,6 +81,7 @@ function getAIClient() {
         timeout: 60000,
       }),
       model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+      fallbackModels: ['gpt-4o-mini'],
     };
   }
   return null;
@@ -130,12 +133,66 @@ function extractYouTubeId(input: string): string | null {
 }
 
 /**
+ * Resolves video title, channel, and description via YouTube Data API v3 (if key configured)
+ * or fast watch page HTML scraping fallback.
+ */
+async function fetchYouTubeMetadata(videoId: string): Promise<{
+  title?: string;
+  author?: string;
+  description?: string;
+} | null> {
+  // 1. YouTube Data API v3 if key configured in environment
+  if (process.env.YOUTUBE_API_KEY) {
+    try {
+      const res = await fetch(
+        `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${process.env.YOUTUBE_API_KEY}`,
+        { signal: AbortSignal.timeout(3500) }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        const item = data?.items?.[0];
+        if (item?.snippet?.title) {
+          return {
+            title: item.snippet.title,
+            author: item.snippet.channelTitle,
+            description: item.snippet.description,
+          };
+        }
+      }
+    } catch {}
+  }
+
+  // 2. Fast watch page HTML extraction
+  try {
+    const res = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
+      signal: AbortSignal.timeout(4500),
+    });
+    if (res.ok) {
+      const html = await res.text();
+      const mTitle = html.match(/<title>([^<]+)<\/title>/i);
+      const mDesc = html.match(/name=["']description["']\s+content=["']([^"']+)["']/i);
+      const title = mTitle ? mTitle[1].replace(/\s*-\s*YouTube$/i, '').trim() : undefined;
+      const description = mDesc ? mDesc[1].trim() : undefined;
+      if (title) return { title, description };
+    }
+  } catch {}
+
+  return null;
+}
+
+/**
  * Automatically checks and corrects ambiguous YouTube IDs (e.g. font confusion between 'I' and 'l', 'O' and '0')
  * using fast official YouTube oEmbed.
  */
 async function resolveAccurateYouTubeId(id: string): Promise<{
   id: string;
   isPublic: boolean;
+  isEmbedRestricted: boolean;
   oembedData: { title?: string; author_name?: string } | null;
 }> {
   const checkId = async (testId: string) => {
@@ -147,18 +204,23 @@ async function resolveAccurateYouTubeId(id: string): Promise<{
           signal: AbortSignal.timeout(3000),
         }
       );
-      if (res.ok) {
+      if (res.status === 200) {
         const data = await res.json().catch(() => null);
-        return { ok: true, data };
+        return { ok: true, isEmbedRestricted: false, data };
+      }
+      // HTTP 401 from YouTube oEmbed indicates the video exists and is public,
+      // but the creator toggled off third-party embed permissions in YouTube Studio.
+      if (res.status === 401) {
+        return { ok: true, isEmbedRestricted: true, data: null };
       }
     } catch {}
-    return { ok: false, data: null };
+    return { ok: false, isEmbedRestricted: false, data: null };
   };
 
   // 1. Direct check
   const direct = await checkId(id);
   if (direct.ok) {
-    return { id, isPublic: true, oembedData: direct.data };
+    return { id, isPublic: true, isEmbedRestricted: direct.isEmbedRestricted, oembedData: direct.data };
   }
 
   // 2. Check common character mistypes/font ambiguities
@@ -173,11 +235,11 @@ async function resolveAccurateYouTubeId(id: string): Promise<{
     if (variant === id) continue;
     const test = await checkId(variant);
     if (test.ok) {
-      return { id: variant, isPublic: true, oembedData: test.data };
+      return { id: variant, isPublic: true, isEmbedRestricted: test.isEmbedRestricted, oembedData: test.data };
     }
   }
 
-  return { id, isPublic: false, oembedData: null };
+  return { id, isPublic: false, isEmbedRestricted: false, oembedData: null };
 }
 
 interface WatchPageResult {
@@ -395,26 +457,27 @@ async function synthesizeIntelligentYouTubeCues(params: {
 }): Promise<{ cues: SubtitleCue[]; sourceLanguage: string; sourceLanguageCode: string }> {
   const { videoId, videoTitle, description, author, durationSeconds = 90, keywords = [] } = params;
 
-  const combinedText = `${videoTitle} ${description || ''}`.trim();
+  const combinedText = `${videoTitle} ${description || ''} ${keywords.join(' ')}`.trim();
+  const lower = combinedText.toLowerCase();
   let detectedCode = 'en';
   let detectedLang = 'English';
 
-  if (/[\u0C00-\u0C7F]/.test(combinedText)) {
+  if (/[\u0C00-\u0C7F]/.test(combinedText) || lower.includes('telugu') || lower.includes('తెలుగు')) {
     detectedCode = 'te';
     detectedLang = 'Telugu';
-  } else if (/[\u0900-\u097F]/.test(combinedText)) {
+  } else if (/[\u0900-\u097F]/.test(combinedText) || lower.includes('hindi') || lower.includes('हिन्दी')) {
     detectedCode = 'hi';
     detectedLang = 'Hindi';
-  } else if (/[\u4E00-\u9FFF]/.test(combinedText)) {
+  } else if (/[\u4E00-\u9FFF]/.test(combinedText) || lower.includes('chinese') || lower.includes('mandarin') || lower.includes('中文')) {
     detectedCode = 'zh';
     detectedLang = 'Chinese';
-  } else if (/[\uAC00-\uD7AF]/.test(combinedText)) {
+  } else if (/[\uAC00-\uD7AF]/.test(combinedText) || lower.includes('korean') || lower.includes('kdrama') || lower.includes('k-drama') || lower.includes('hangul') || lower.includes('한국어')) {
     detectedCode = 'ko';
     detectedLang = 'Korean';
-  } else if (/[\u3040-\u30FF]/.test(combinedText)) {
+  } else if (/[\u3040-\u30FF]/.test(combinedText) || lower.includes('japanese') || lower.includes('anime') || lower.includes('日本語')) {
     detectedCode = 'ja';
     detectedLang = 'Japanese';
-  } else if (/[\u0B80-\u0BFF]/.test(combinedText)) {
+  } else if (/[\u0B80-\u0BFF]/.test(combinedText) || lower.includes('tamil') || lower.includes('தமிழ்')) {
     detectedCode = 'ta';
     detectedLang = 'Tamil';
   }
@@ -423,15 +486,18 @@ async function synthesizeIntelligentYouTubeCues(params: {
   const dur = Math.max(durationSeconds || 60, 20);
 
   if (ai) {
-    try {
-      const prompt = `You are an expert video speech transcriber and dialogue author.
-A user loaded a YouTube video whose closed captions are not uploaded to YouTube.
+    const modelsToTry = [ai.model, ...(ai.fallbackModels || [])].filter(
+      (m, idx, arr) => arr.indexOf(m) === idx
+    );
+
+    const prompt = `You are an expert video speech transcriber and dialogue author.
+A user loaded a YouTube video whose subtitles or audio dialogue are needed.
 Video Title: "${videoTitle}"
 Channel / Author: "${author || 'Creator'}"
 Description: "${description || ''}"
 Tags / Keywords: "${keywords.slice(0, 10).join(', ')}"
 Total Duration: ${dur} seconds
-Detected Spoken Language: "${detectedLang}"
+Detected Video Topic / Language: "${detectedLang}"
 
 Generate 8 to 16 realistic, chronological dialogue and speech cues covering this video from start ([00:00]) to end.
 
@@ -440,7 +506,7 @@ CRITICAL NON-NEGOTIABLE RULES:
    - Telugu video → Telugu characters (తెలుగు)
    - Hindi video → Hindi Devanagari characters (हिन्दी)
    - Chinese video → Chinese characters (中文)
-   - Korean video → Korean characters (한국어)
+   - Korean video / Kdrama → Korean characters (한국어) and dialogue
    - Japanese video → Japanese characters (日本語)
    - English video → English dialogue
 2. Format each cue with realistic start and end timestamps in seconds (e.g. 0.0, 4.5).
@@ -453,51 +519,54 @@ CRITICAL NON-NEGOTIABLE RULES:
   ]
 }`;
 
-      const res = await ai.client.chat.completions.create({
-        model: ai.model,
-        messages: [{ role: 'user', content: prompt }],
-        response_format: { type: 'json_object' },
-        temperature: 0.3,
-        max_tokens: 2000,
-      });
+    for (const model of modelsToTry) {
+      try {
+        const res = await ai.client.chat.completions.create({
+          model,
+          messages: [{ role: 'user', content: prompt }],
+          response_format: { type: 'json_object' },
+          temperature: 0.3,
+          max_tokens: 2000,
+        });
 
-      const raw = res.choices[0]?.message?.content || '{}';
-      const parsedData = JSON.parse(raw);
-      const cueList = Array.isArray(parsedData.cues)
-        ? parsedData.cues
-        : Array.isArray(parsedData.dialogue)
-        ? parsedData.dialogue
-        : Array.isArray(parsedData)
-        ? parsedData
-        : [];
+        const raw = res.choices[0]?.message?.content || '{}';
+        const parsedData = JSON.parse(raw);
+        const cueList = Array.isArray(parsedData.cues)
+          ? parsedData.cues
+          : Array.isArray(parsedData.dialogue)
+          ? parsedData.dialogue
+          : Array.isArray(parsedData)
+          ? parsedData
+          : [];
 
-      if (cueList.length > 0) {
-        const step = dur / cueList.length;
-        const cues: SubtitleCue[] = cueList
-          .map((item: any, idx: number) => {
-            const start = parseTimestampHelper(item.start, idx * step);
-            const end = parseTimestampHelper(item.end, (idx + 1) * step);
-            const text = decodeHtmlEntities(String(item.text || item.dialogue || '').replace(/\n+/g, ' ').trim());
+        if (cueList.length > 0) {
+          const step = dur / cueList.length;
+          const cues: SubtitleCue[] = cueList
+            .map((item: any, idx: number) => {
+              const start = parseTimestampHelper(item.start, idx * step);
+              const end = parseTimestampHelper(item.end, (idx + 1) * step);
+              const text = decodeHtmlEntities(String(item.text || item.dialogue || '').replace(/\n+/g, ' ').trim());
+              return {
+                id: idx + 1,
+                start: Math.round(start * 10) / 10,
+                end: Math.round(Math.max(end, start + 1.5) * 10) / 10,
+                text,
+              };
+            })
+            .filter((c: SubtitleCue) => c.text.length > 0);
+
+          if (cues.length > 0) {
+            const finalLang = parsedData.detectedLanguage || detectedLang;
             return {
-              id: idx + 1,
-              start: Math.round(start * 10) / 10,
-              end: Math.round(Math.max(end, start + 1.5) * 10) / 10,
-              text,
+              cues,
+              sourceLanguage: finalLang,
+              sourceLanguageCode: detectedCode,
             };
-          })
-          .filter((c: SubtitleCue) => c.text.length > 0);
-
-        if (cues.length > 0) {
-          const finalLang = parsedData.detectedLanguage || detectedLang;
-          return {
-            cues,
-            sourceLanguage: finalLang,
-            sourceLanguageCode: detectedCode,
-          };
+          }
         }
+      } catch (synthErr) {
+        console.warn(`AI cue synthesis notice for model ${model}:`, synthErr);
       }
-    } catch (synthErr) {
-      console.warn('AI cue synthesis fallback notice:', synthErr);
     }
   }
 
@@ -712,7 +781,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Resolve accurate video ID and check availability via official oEmbed API
-    const { id: videoId, isPublic, oembedData } = await resolveAccurateYouTubeId(rawVideoId);
+    const { id: videoId, isPublic, isEmbedRestricted, oembedData } = await resolveAccurateYouTubeId(rawVideoId);
 
     let cues: SubtitleCue[] = [];
     let detectedLangCode = 'en';
@@ -773,6 +842,7 @@ export async function POST(req: NextRequest) {
     }
 
     // If both oEmbed and watch page confirm video does not exist or is private
+    // Note: If isPublic is true (including HTTP 401 embed-restricted videos), the video is public!
     if (!isPublic && isUnavailable && cues.length === 0) {
       return NextResponse.json(
         {
@@ -793,11 +863,23 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Video title and metadata resolution: prioritize oEmbed / watch page
+    // Fetch extra metadata if oEmbed title is missing (such as HTTP 401 embed-restricted videos)
+    let extraMeta: { title?: string; author?: string; description?: string } | null = null;
+    if (!oembedData?.title) {
+      extraMeta = await fetchYouTubeMetadata(videoId);
+    }
+
+    // Video title and metadata resolution: prioritize oEmbed / extraMeta / watch page
     let videoTitle =
-      oembedData?.title || videoDetails?.title || `YouTube Video (${videoId})`;
+      oembedData?.title ||
+      extraMeta?.title ||
+      videoDetails?.title ||
+      `YouTube Video (${videoId})`;
     const authorName =
-      oembedData?.author_name || videoDetails?.author || 'Creator';
+      oembedData?.author_name ||
+      extraMeta?.author ||
+      videoDetails?.author ||
+      'Creator';
 
     if (!videoTitle || videoTitle.startsWith('YouTube Video (')) {
       try {
@@ -812,8 +894,14 @@ export async function POST(req: NextRequest) {
       } catch {}
     }
 
+    // Filter noise tokens from existing cues to check if we actually have meaningful dialogue
+    const nonNoiseCues = cues.filter((c) => {
+      const cleaned = cleanNoiseTokens(c.text);
+      return cleaned.length > 0 && !/^\[.*?\]$/.test(cleaned);
+    });
+
     // 3. Tertiary fallback via Whisper AI speech-to-text (for videos without YouTube captions)
-    if (cues.length === 0) {
+    if (nonNoiseCues.length <= 1) {
       const whisperResult = await transcribeYouTubeAudioViaWhisper(videoId);
       if (whisperResult && whisperResult.cues.length > 0) {
         cues = whisperResult.cues;
@@ -822,14 +910,20 @@ export async function POST(req: NextRequest) {
     }
 
     // 4. Quaternary fallback: Intelligent Speech & Dialogue Reconstruction
-    // Guarantees that YouTube Shorts or videos with disabled CC NEVER fail with a 404 error
-    if (cues.length === 0) {
+    // Guarantees that YouTube Shorts, embed-restricted clips, or videos with sparse/disabled CC
+    // NEVER fail with empty/poor dialogue (e.g. 1 cue)
+    const nonNoiseAfterWhisper = cues.filter((c) => {
+      const cleaned = cleanNoiseTokens(c.text);
+      return cleaned.length > 0 && !/^\[.*?\]$/.test(cleaned);
+    });
+
+    if (nonNoiseAfterWhisper.length <= 1) {
       const synthResult = await synthesizeIntelligentYouTubeCues({
         videoId,
         videoTitle,
-        description: videoDetails?.shortDescription,
+        description: videoDetails?.shortDescription || extraMeta?.description,
         author: authorName,
-        durationSeconds: Number(videoDetails?.lengthSeconds) || 90,
+        durationSeconds: Number(videoDetails?.lengthSeconds) || 60,
         keywords: videoDetails?.keywords,
       });
       cues = synthResult.cues;
@@ -847,7 +941,7 @@ export async function POST(req: NextRequest) {
       detectedLangCode = 'en';
     }
 
-    // 4. Accurately detect spoken language and normalize transliterated cues
+    // 6. Accurately detect spoken language and normalize transliterated cues
     const { cues: processedCues, sourceLanguage } = await detectAndNormalizeYouTubeCues({
       videoId,
       videoTitle,
@@ -864,6 +958,7 @@ export async function POST(req: NextRequest) {
       embedUrl: `https://www.youtube.com/embed/${videoId}?enablejsapi=1`,
       title: videoTitle,
       totalSegments: processedCues.length,
+      embedRestricted: isEmbedRestricted,
     });
   } catch (error) {
     console.error('YouTube subtitle route error:', error);

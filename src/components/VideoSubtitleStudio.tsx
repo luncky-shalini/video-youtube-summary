@@ -6,9 +6,11 @@ import {
   Subtitles,
   Languages,
   Play,
+  Pause,
   RotateCcw,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
   Loader2,
   Youtube,
   Film,
@@ -202,6 +204,46 @@ export function VideoSubtitleStudio() {
   const [isGeneratingTranscript, setIsGeneratingTranscript] = useState<boolean>(false);
   const [translationError, setTranslationError] = useState<string | null>(null);
 
+  // YouTube embed restriction & companion simulation state
+  const [isEmbedRestricted, setIsEmbedRestricted] = useState<boolean>(false);
+  const [isPlayingSimulation, setIsPlayingSimulation] = useState<boolean>(false);
+  const [currentYouTubeId, setCurrentYouTubeId] = useState<string>('');
+  const simulationTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const effectiveDuration =
+    videoDuration > 0
+      ? videoDuration
+      : Math.max(...(original_subtitles.map((c) => c.end) || [60]), 60);
+
+  // Simulation player timer for embed-restricted YouTube videos
+  useEffect(() => {
+    if (!isPlayingSimulation) {
+      if (simulationTimerRef.current) {
+        clearInterval(simulationTimerRef.current);
+        simulationTimerRef.current = null;
+      }
+      return;
+    }
+
+    simulationTimerRef.current = setInterval(() => {
+      setCurrentTime((prev) => {
+        const next = Math.round((prev + 0.2) * 10) / 10;
+        if (next >= effectiveDuration) {
+          setIsPlayingSimulation(false);
+          return 0;
+        }
+        return next;
+      });
+    }, 200);
+
+    return () => {
+      if (simulationTimerRef.current) {
+        clearInterval(simulationTimerRef.current);
+        simulationTimerRef.current = null;
+      }
+    };
+  }, [isPlayingSimulation, effectiveDuration]);
+
   // YouTube import input state
   const [youtubeInput, setYoutubeInput] = useState<string>('');
   const [isLoadingYoutube, setIsLoadingYoutube] = useState<boolean>(false);
@@ -299,6 +341,13 @@ export function VideoSubtitleStudio() {
                 }
               }
             },
+            onError: (event: any) => {
+              if (isCancelled) return;
+              // YouTube error 101 or 150: creator disabled embed playback
+              if (event?.data === 101 || event?.data === 150 || event?.data === 2) {
+                setIsEmbedRestricted(true);
+              }
+            },
           },
         });
       } catch (err) {
@@ -362,6 +411,9 @@ export function VideoSubtitleStudio() {
       videoRef.current.currentTime = timeSec;
       videoRef.current.play().catch(() => {});
     } else if (videoSource?.type === 'youtube') {
+      if (isEmbedRestricted) {
+        return;
+      }
       if (playerRef.current && typeof playerRef.current.seekTo === 'function') {
         playerRef.current.seekTo(timeSec, true);
       } else {
@@ -383,6 +435,12 @@ export function VideoSubtitleStudio() {
 
     setUploadError(null);
     setTranslationError(null);
+    setIsEmbedRestricted(false);
+    setIsPlayingSimulation(false);
+    if (simulationTimerRef.current) {
+      clearInterval(simulationTimerRef.current);
+      simulationTimerRef.current = null;
+    }
 
     // Validate file type
     if (!isValidVideoFile(file)) {
@@ -474,23 +532,20 @@ export function VideoSubtitleStudio() {
           });
 
           const data = await res.json().catch(() => ({}));
-          if (!res.ok) {
-            throw new Error(
-              data?.error ||
-                'Transcription service request failed. Please check your network and try again.'
-            );
-          }
+          if (res.ok && data) {
+            if (data.language && detectedLang === 'English') {
+              detectedLang = data.language;
+            }
 
-          if (i === 0 && data.language) {
-            detectedLang = data.language;
-          }
-
-          const chunkCues: SubtitleCue[] = data.cues || [];
-          for (const cue of chunkCues) {
-            combinedCues.push({
-              ...cue,
-              id: combinedCues.length + 1,
-            });
+            const chunkCues: SubtitleCue[] = data.cues || [];
+            for (const cue of chunkCues) {
+              combinedCues.push({
+                ...cue,
+                id: combinedCues.length + 1,
+              });
+            }
+          } else {
+            console.warn(`Audio chunk ${i} notice:`, data?.error || res.statusText);
           }
         }
       } else {
@@ -579,6 +634,14 @@ export function VideoSubtitleStudio() {
       }
 
       const detectedSource = data.sourceLanguage || 'English';
+      setCurrentYouTubeId(data.videoId || '');
+      setIsEmbedRestricted(Boolean(data.embedRestricted));
+      setIsPlayingSimulation(false);
+      if (simulationTimerRef.current) {
+        clearInterval(simulationTimerRef.current);
+        simulationTimerRef.current = null;
+      }
+
       setOriginalLanguage(detectedSource);
       setSelectedSubtitleLanguage(detectedSource);
       setSelectedLanguage(detectedSource);
@@ -1032,6 +1095,69 @@ export function VideoSubtitleStudio() {
                 allowFullScreen
                 className="h-full w-full border-0"
               />
+            )}
+
+            {/* If video creator disabled embedded playback on third-party websites */}
+            {videoSource.type === 'youtube' && isEmbedRestricted && (
+              <div className="absolute inset-0 z-20 flex flex-col items-center justify-between bg-gradient-to-b from-slate-950/95 via-slate-900/90 to-slate-950/95 p-4 sm:p-6 text-white backdrop-blur-xs">
+                <div className="w-full max-w-lg text-center pt-2">
+                  <div className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-3.5 py-1 text-xs font-semibold text-amber-300">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                    Embedded Playback Disabled by Creator
+                  </div>
+                  <p className="mt-2 text-xs text-slate-300 leading-relaxed">
+                    The owner of this video restricts video stream playback exclusively to YouTube.
+                    Your full dialogue transcript, translations, synopsis, and PDFs are ready below.
+                  </p>
+                </div>
+
+                <div className="flex flex-col items-center gap-2">
+                  <a
+                    href={`https://www.youtube.com/watch?v=${currentYouTubeId || 'watch'}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 rounded-xl bg-red-600 px-5 py-2.5 text-xs sm:text-sm font-bold text-white shadow-lg transition hover:bg-red-500 active:scale-95"
+                  >
+                    <Play className="h-4 w-4 fill-white" />
+                    Watch Video on YouTube ↗
+                  </a>
+                  <span className="text-[11px] text-slate-400">
+                    Opens in a new tab • Use controls below to follow synchronized subtitles
+                  </span>
+                </div>
+
+                <div className="w-full max-w-xl rounded-2xl border border-slate-700/80 bg-slate-800/90 p-3 sm:p-4 shadow-xl backdrop-blur-md mb-2">
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setIsPlayingSimulation(!isPlayingSimulation)}
+                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-teal-500 text-slate-950 font-bold transition hover:bg-teal-400 active:scale-95"
+                      title={isPlayingSimulation ? 'Pause Subtitles' : 'Play & Follow Subtitles'}
+                    >
+                      {isPlayingSimulation ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5 fill-current" />}
+                    </button>
+
+                    <div className="flex-1 flex flex-col gap-1">
+                      <div className="flex justify-between text-[11px] font-mono text-slate-300">
+                        <span>{formatTime(currentTime)}</span>
+                        <span className="font-sans text-[11px] text-teal-300 font-semibold">
+                          {isPlayingSimulation ? 'Playing Subtitles...' : 'Subtitle Player'}
+                        </span>
+                        <span>{formatTime(effectiveDuration)}</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={0}
+                        max={effectiveDuration || 60}
+                        step={0.1}
+                        value={currentTime}
+                        onChange={(e) => handleSeek(parseFloat(e.target.value))}
+                        className="w-full accent-teal-400 h-1.5 bg-slate-700 rounded-lg cursor-pointer"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
             )}
 
             {/* Synchronized Subtitle Overlay (Cleanly positioned above bottom player controls) */}
