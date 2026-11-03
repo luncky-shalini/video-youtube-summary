@@ -133,13 +133,16 @@ function extractYouTubeId(input: string): string | null {
 }
 
 /**
- * Resolves video title, channel, and description via YouTube Data API v3 (if key configured)
- * or fast watch page HTML scraping fallback.
+ * Resolves video title, channel, description, and official audio language
+ * via YouTube Data API v3 (if key configured) or fast watch page HTML scraping fallback.
  */
 async function fetchYouTubeMetadata(videoId: string): Promise<{
   title?: string;
   author?: string;
   description?: string;
+  defaultAudioLanguage?: string;
+  defaultLanguage?: string;
+  tags?: string[];
 } | null> {
   // 1. YouTube Data API v3 if key configured in environment
   if (process.env.YOUTUBE_API_KEY) {
@@ -156,6 +159,9 @@ async function fetchYouTubeMetadata(videoId: string): Promise<{
             title: item.snippet.title,
             author: item.snippet.channelTitle,
             description: item.snippet.description,
+            defaultAudioLanguage: item.snippet.defaultAudioLanguage,
+            defaultLanguage: item.snippet.defaultLanguage,
+            tags: item.snippet.tags,
           };
         }
       }
@@ -242,6 +248,255 @@ async function resolveAccurateYouTubeId(id: string): Promise<{
   return { id, isPublic: false, isEmbedRestricted: false, oembedData: null };
 }
 
+interface InnerTubeCaptionResult {
+  cues: SubtitleCue[];
+  langCode: string;
+  status?: string;
+  videoDetails?: {
+    title?: string;
+    author?: string;
+    shortDescription?: string;
+    lengthSeconds?: string | number;
+    keywords?: string[];
+  };
+}
+
+/**
+ * Robust XML parser for YouTube timedtext format.
+ * Supports format 3 (<p t="..." d="..."><s>...</s></p>) and format 1 (<text start="..." dur="...">...).
+ */
+function parseTimedTextXml(xml: string): SubtitleCue[] {
+  const cues: SubtitleCue[] = [];
+
+  // Format 1: <p t="(\d+)" d="(\d+)"[^>]*>([\s\S]*?)<\/p>
+  const pRegex = /<p\s+t="(\d+)"(?:\s+d="(\d+)")?[^>]*>([\s\S]*?)<\/p>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = pRegex.exec(xml)) !== null) {
+    const startMs = parseInt(match[1], 10);
+    const durMs = match[2] ? parseInt(match[2], 10) : 2000;
+    const rawInner = match[3] || '';
+    let text = rawInner.replace(/<[^>]+>/g, '').trim();
+    text = decodeHtmlEntities(text).replace(/\s+/g, ' ');
+    if (text) {
+      const start = Math.round((startMs / 1000) * 10) / 10;
+      const end = Math.round(((startMs + Math.max(durMs, 1000)) / 1000) * 10) / 10;
+      cues.push({
+        id: cues.length + 1,
+        start,
+        end,
+        text,
+      });
+    }
+  }
+
+  // Format 2: <text start="([\d.]+)" dur="([\d.]+)"[^>]*>([\s\S]*?)<\/text>
+  if (cues.length === 0) {
+    const textRegex = /<text\s+start="([\d.]+)"(?:\s+dur="([\d.]+)")?[^>]*>([\s\S]*?)<\/text>/gi;
+    while ((match = textRegex.exec(xml)) !== null) {
+      const startSec = parseFloat(match[1]);
+      const durSec = match[2] ? parseFloat(match[2]) : 2;
+      const rawInner = match[3] || '';
+      let text = rawInner.replace(/<[^>]+>/g, '').trim();
+      text = decodeHtmlEntities(text).replace(/\s+/g, ' ');
+      if (text) {
+        const start = Math.round(startSec * 10) / 10;
+        const end = Math.round((startSec + Math.max(durSec, 1.5)) * 10) / 10;
+        cues.push({
+          id: cues.length + 1,
+          start,
+          end,
+          text,
+        });
+      }
+    }
+  }
+
+  return cues;
+}
+
+/**
+ * Intelligent caption track selector:
+ * Automatically selects the video's authentic original spoken language track
+ * (e.g. Tamil, Telugu, Hindi, Korean) rather than defaulting to English.
+ */
+function pickBestCaptionTrack(captionTracks: any[], preferredLangCode?: string): any {
+  if (!Array.isArray(captionTracks) || captionTracks.length === 0) return null;
+
+  // 1. Preferred language (e.g. from YouTube Data API defaultAudioLanguage)
+  if (preferredLangCode) {
+    const cleanPref = preferredLangCode.toLowerCase().split('-')[0].trim();
+    const match = captionTracks.find((t) => t.languageCode?.toLowerCase().split('-')[0].trim() === cleanPref);
+    if (match) return match;
+  }
+
+  // 2. Prioritize non-English native track (Tamil 'ta', Telugu 'te', Hindi 'hi', Kannada 'kn', etc.)
+  const nativeTrack = captionTracks.find((t) => {
+    const code = t.languageCode?.toLowerCase().split('-')[0].trim();
+    return code && code !== 'en';
+  });
+  if (nativeTrack) return nativeTrack;
+
+  // 3. Human-created / manual track before auto-generated ('asr')
+  const manualTrack = captionTracks.find((t) => !t.kind || t.kind !== 'asr');
+  if (manualTrack) return manualTrack;
+
+  // 4. Default to first available track
+  return captionTracks[0];
+}
+
+/**
+ * Direct InnerTube Player API Client
+ * Bypasses datacenter/cloud IP blocks by using Android and iOS client contexts.
+ * Returns authentic transcript cues and original languageCode on both Local and Vercel.
+ */
+async function fetchCaptionsViaInnerTube(
+  videoId: string,
+  preferredLangCode?: string
+): Promise<InnerTubeCaptionResult | null> {
+  const clients = [
+    {
+      name: 'ANDROID',
+      userAgent: 'com.google.android.youtube/20.10.38 (Linux; U; Android 14)',
+      body: {
+        context: {
+          client: {
+            clientName: 'ANDROID',
+            clientVersion: '20.10.38',
+            androidSdkVersion: 34,
+            hl: 'en',
+            gl: 'US',
+          },
+        },
+        videoId,
+      },
+    },
+    {
+      name: 'IOS',
+      userAgent: 'com.google.ios.youtube/19.45.4 (iPhone16,2; U; CPU iOS 18_1 like Mac OS X; en_US)',
+      body: {
+        context: {
+          client: {
+            clientName: 'IOS',
+            clientVersion: '19.45.4',
+            deviceMake: 'Apple',
+            deviceModel: 'iPhone16,2',
+            hl: 'en',
+            gl: 'US',
+          },
+        },
+        videoId,
+      },
+    },
+    {
+      name: 'WEB_EMBEDDED',
+      userAgent:
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+      body: {
+        context: {
+          client: {
+            clientName: 'WEB_EMBEDDED_PLAYER',
+            clientVersion: '1.20240301.01.00',
+            hl: 'en',
+            gl: 'US',
+          },
+        },
+        videoId,
+      },
+    },
+  ];
+
+  for (const clientConfig of clients) {
+    try {
+      const res = await fetch('https://www.youtube.com/youtubei/v1/player', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': clientConfig.userAgent,
+        },
+        body: JSON.stringify(clientConfig.body),
+        signal: AbortSignal.timeout(6000),
+      });
+
+      if (!res.ok) continue;
+      const data = await res.json();
+      const status = data?.playabilityStatus?.status;
+      const videoDetails = data?.videoDetails || null;
+
+      if (status && status !== 'OK') {
+        return { cues: [], langCode: 'en', status, videoDetails };
+      }
+
+      const captionTracks = data?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+      if (!Array.isArray(captionTracks) || captionTracks.length === 0) {
+        continue;
+      }
+
+      const chosenTrack = pickBestCaptionTrack(captionTracks, preferredLangCode);
+      if (!chosenTrack?.baseUrl) continue;
+
+      // Fetch timedtext XML
+      const subRes = await fetch(chosenTrack.baseUrl, {
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        },
+        signal: AbortSignal.timeout(6000),
+      });
+
+      if (!subRes.ok) continue;
+
+      const rawSub = await subRes.text();
+      let cues: SubtitleCue[] = [];
+
+      // Check if response is json3 format
+      if (rawSub.trim().startsWith('{')) {
+        try {
+          const subData = JSON.parse(rawSub);
+          const events = subData?.events || [];
+          for (let i = 0; i < events.length; i++) {
+            const ev = events[i];
+            if (!ev.segs || !Array.isArray(ev.segs)) continue;
+            const text = decodeHtmlEntities(
+              ev.segs
+                .map((s: any) => s.utf8 || '')
+                .join('')
+                .replace(/\n+/g, ' ')
+                .trim()
+            );
+            if (!text || text === '\n') continue;
+            const tStartMs = ev.tStartMs ?? 0;
+            const dDurationMs = ev.dDurationMs ?? 2000;
+            cues.push({
+              id: cues.length + 1,
+              start: Math.round((tStartMs / 1000) * 10) / 10,
+              end: Math.round(((tStartMs + Math.max(dDurationMs, 1000)) / 1000) * 10) / 10,
+              text,
+            });
+          }
+        } catch {}
+      }
+
+      // If not json or json produced no cues, parse as XML
+      if (cues.length === 0) {
+        cues = parseTimedTextXml(rawSub);
+      }
+
+      if (cues.length > 0) {
+        return {
+          cues,
+          langCode: chosenTrack.languageCode || 'en',
+          videoDetails,
+          status: 'OK',
+        };
+      }
+    } catch (clientErr) {
+      console.warn(`InnerTube client ${clientConfig.name} notice:`, clientErr);
+    }
+  }
+
+  return null;
+}
+
 interface WatchPageResult {
   cues: SubtitleCue[];
   langCode: string;
@@ -259,7 +514,8 @@ interface WatchPageResult {
  * Direct parser from YouTube watch page HTML captions
  */
 async function fetchCaptionsViaWatchPage(
-  videoId: string
+  videoId: string,
+  preferredLangCode?: string
 ): Promise<WatchPageResult | null> {
   try {
     const res = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
@@ -288,8 +544,8 @@ async function fetchCaptionsViaWatchPage(
       return { cues: [], langCode: 'en', videoDetails };
     }
 
-    // Pick first track (prioritize English or first available)
-    const track = captionTracks.find((t: any) => t.languageCode?.startsWith('en')) || captionTracks[0];
+    // Pick best track prioritizing original spoken language
+    const track = pickBestCaptionTrack(captionTracks, preferredLangCode);
     if (!track?.baseUrl) {
       return { cues: [], langCode: 'en', videoDetails };
     }
@@ -454,32 +710,51 @@ async function synthesizeIntelligentYouTubeCues(params: {
   author?: string;
   durationSeconds?: number;
   keywords?: string[];
+  defaultAudioLanguage?: string;
 }): Promise<{ cues: SubtitleCue[]; sourceLanguage: string; sourceLanguageCode: string }> {
-  const { videoId, videoTitle, description, author, durationSeconds = 90, keywords = [] } = params;
+  const { videoId, videoTitle, description, author, durationSeconds = 90, keywords = [], defaultAudioLanguage } = params;
 
-  const combinedText = `${videoTitle} ${description || ''} ${keywords.join(' ')}`.trim();
+  const combinedText = `${videoTitle} ${description || ''} ${keywords.join(' ')} ${author || ''}`.trim();
   const lower = combinedText.toLowerCase();
   let detectedCode = 'en';
   let detectedLang = 'English';
 
-  if (/[\u0C00-\u0C7F]/.test(combinedText) || lower.includes('telugu') || lower.includes('తెలుగు')) {
-    detectedCode = 'te';
-    detectedLang = 'Telugu';
-  } else if (/[\u0900-\u097F]/.test(combinedText) || lower.includes('hindi') || lower.includes('हिन्दी')) {
-    detectedCode = 'hi';
-    detectedLang = 'Hindi';
-  } else if (/[\u4E00-\u9FFF]/.test(combinedText) || lower.includes('chinese') || lower.includes('mandarin') || lower.includes('中文')) {
-    detectedCode = 'zh';
-    detectedLang = 'Chinese';
-  } else if (/[\uAC00-\uD7AF]/.test(combinedText) || lower.includes('korean') || lower.includes('kdrama') || lower.includes('k-drama') || lower.includes('hangul') || lower.includes('한국어')) {
-    detectedCode = 'ko';
-    detectedLang = 'Korean';
-  } else if (/[\u3040-\u30FF]/.test(combinedText) || lower.includes('japanese') || lower.includes('anime') || lower.includes('日本語')) {
-    detectedCode = 'ja';
-    detectedLang = 'Japanese';
-  } else if (/[\u0B80-\u0BFF]/.test(combinedText) || lower.includes('tamil') || lower.includes('தமிழ்')) {
-    detectedCode = 'ta';
-    detectedLang = 'Tamil';
+  // 1. Check official audio language if available from YouTube Data API
+  if (defaultAudioLanguage) {
+    const resolved = resolveLanguageName(defaultAudioLanguage);
+    if (resolved && resolved !== 'English') {
+      detectedLang = resolved;
+      detectedCode = defaultAudioLanguage.toLowerCase().split('-')[0].trim();
+    }
+  }
+
+  // 2. Script and keyword detection
+  if (detectedLang === 'English') {
+    if (/[\u0B80-\u0BFF]/.test(combinedText) || lower.includes('tamil') || lower.includes('தமிழ்')) {
+      detectedCode = 'ta';
+      detectedLang = 'Tamil';
+    } else if (/[\u0C00-\u0C7F]/.test(combinedText) || lower.includes('telugu') || lower.includes('తెలుగు')) {
+      detectedCode = 'te';
+      detectedLang = 'Telugu';
+    } else if (/[\u0C80-\u0CFF]/.test(combinedText) || lower.includes('kannada') || lower.includes('ಕನ್ನಡ')) {
+      detectedCode = 'kn';
+      detectedLang = 'Kannada';
+    } else if (/[\u0D00-\u0D7F]/.test(combinedText) || lower.includes('malayalam') || lower.includes('മലയാളം')) {
+      detectedCode = 'ml';
+      detectedLang = 'Malayalam';
+    } else if (/[\u0900-\u097F]/.test(combinedText) || lower.includes('hindi') || lower.includes('हिन्दी')) {
+      detectedCode = 'hi';
+      detectedLang = 'Hindi';
+    } else if (/[\u4E00-\u9FFF]/.test(combinedText) || lower.includes('chinese') || lower.includes('mandarin') || lower.includes('中文')) {
+      detectedCode = 'zh';
+      detectedLang = 'Chinese';
+    } else if (/[\uAC00-\uD7AF]/.test(combinedText) || lower.includes('korean') || lower.includes('kdrama') || lower.includes('k-drama') || lower.includes('hangul') || lower.includes('한국어')) {
+      detectedCode = 'ko';
+      detectedLang = 'Korean';
+    } else if (/[\u3040-\u30FF]/.test(combinedText) || lower.includes('japanese') || lower.includes('anime') || lower.includes('日本語')) {
+      detectedCode = 'ja';
+      detectedLang = 'Japanese';
+    }
   }
 
   const ai = getAIClient();
@@ -503,7 +778,10 @@ Generate 8 to 16 realistic, chronological dialogue and speech cues covering this
 
 CRITICAL NON-NEGOTIABLE RULES:
 1. All dialogue MUST be in the video's authentic original spoken language and script:
+   - Tamil video → Tamil characters (தமிழ்) and dialogue
    - Telugu video → Telugu characters (తెలుగు)
+   - Kannada video → Kannada characters (ಕನ್ನಡ)
+   - Malayalam video → Malayalam characters (മലയാളം)
    - Hindi video → Hindi Devanagari characters (हिन्दी)
    - Chinese video → Chinese characters (中文)
    - Korean video / Kdrama → Korean characters (한국어) and dialogue
@@ -631,8 +909,30 @@ async function detectAndNormalizeYouTubeCues(params: {
   else if (/[\uAC00-\uD7AF]/.test(sampleText)) scriptLanguage = 'Korean';
   else if (/[\u3040-\u30FF]/.test(sampleText)) scriptLanguage = 'Japanese';
   else if (/[\u4E00-\u9FFF]/.test(sampleText)) scriptLanguage = 'Chinese';
+  else if (/[\u0900-\u097F]/.test(sampleText)) scriptLanguage = 'Hindi';
 
   const reportedLangName = scriptLanguage || resolveLanguageName(detectedLangCode);
+
+  // If the cues are already in genuine native script (e.g. Tamil, Telugu, Kannada, Malayalam, Korean),
+  // they represent authentic native dialogue and do not require AI normalization.
+  // Transliteration normalization is only needed when English audio was erroneously transcribed as Devanagari Hindi.
+  const isLikelyEnglishVideo =
+    videoTitle.toLowerCase().includes('english') ||
+    videoTitle.toLowerCase().includes('suppandi') ||
+    /^[a-z0-9\s.,!?'"()-]+$/i.test(videoTitle);
+
+  const isTransliteratedASR = scriptLanguage === 'Hindi' && isLikelyEnglishVideo;
+
+  if (scriptLanguage && scriptLanguage !== 'Hindi' && !isTransliteratedASR) {
+    const cleanedCues = cues
+      .map((c) => ({ ...c, text: cleanNoiseTokens(c.text) }))
+      .filter((c) => c.text.length > 0 && !/^\[.*?\]$/.test(c.text));
+    return {
+      cues: cleanedCues.length > 0 ? cleanedCues : cues,
+      sourceLanguage: scriptLanguage,
+    };
+  }
+
   const aiConfig = getAIClient();
 
   // If no AI client is available, apply heuristic cleanup
@@ -652,7 +952,7 @@ async function detectAndNormalizeYouTubeCues(params: {
     const detectionPrompt = `You are an expert language and speech recognition analyst.
 A YouTube video has:
 Video Title: "${videoTitle}"
-Reported Caption Language Code: "${detectedLangCode}" (${reportedLangName})
+Report Caption Language Code: "${detectedLangCode}" (${reportedLangName})
 Sample Auto-Generated Cues:
 ${sampleCues.map((c, i) => `${i + 1}. ${c.text}`).join('\n')}
 
@@ -797,51 +1097,70 @@ export async function POST(req: NextRequest) {
     // Resolve accurate video ID and check availability via official oEmbed API
     const { id: videoId, isPublic, isEmbedRestricted, oembedData } = await resolveAccurateYouTubeId(rawVideoId);
 
+    // Fetch extra metadata (including defaultAudioLanguage if YOUTUBE_API_KEY is available)
+    const extraMeta = await fetchYouTubeMetadata(videoId);
+
     let cues: SubtitleCue[] = [];
-    let detectedLangCode = 'en';
+    let detectedLangCode = extraMeta?.defaultAudioLanguage || 'en';
     let isUnavailable = false;
     let isThrottled = false;
+    let videoDetails: any = null;
 
-    // 1. Primary extraction via youtube-transcript with automatic retry
-    for (let attempt = 0; attempt < 2 && cues.length === 0; attempt++) {
-      try {
-        if (attempt > 0) {
-          await new Promise((resolve) => setTimeout(resolve, 600));
-        }
-        const items = await YoutubeTranscript.fetchTranscript(videoId);
-        if (items && items.length > 0) {
-          detectedLangCode = (items[0] as any)?.lang || 'en';
-          cues = items
-            .map((item, idx) => {
-              const rawOffset = item.offset;
-              const rawDuration = item.duration;
-              const start = Math.round((rawOffset > 1000 ? rawOffset / 1000 : rawOffset) * 10) / 10;
-              const duration = Math.round((rawDuration > 1000 ? rawDuration / 1000 : rawDuration) * 10) / 10;
-              return {
-                id: idx + 1,
-                start,
-                end: Math.round((start + Math.max(duration, 1.5)) * 10) / 10,
-                text: decodeHtmlEntities(item.text.replace(/\n+/g, ' ').trim()),
-              };
-            })
-            .filter((c: SubtitleCue) => c.text.length > 0);
-        }
-      } catch (transcriptError: any) {
-        const msg = String(transcriptError?.message || '');
-        if (msg.includes('TooManyRequest') || msg.includes('429')) {
-          isThrottled = true;
+    // 1. Primary extraction via YouTube InnerTube Player API
+    // Works reliably on both residential IPs (Localhost) and datacenter/cloud IPs (Vercel)
+    const innerTubeResult = await fetchCaptionsViaInnerTube(videoId, extraMeta?.defaultAudioLanguage);
+    if (innerTubeResult) {
+      if (innerTubeResult.cues.length > 0) {
+        cues = innerTubeResult.cues;
+        detectedLangCode = innerTubeResult.langCode;
+      }
+      if (innerTubeResult.videoDetails) {
+        videoDetails = innerTubeResult.videoDetails;
+      }
+      if (innerTubeResult.status && innerTubeResult.status !== 'OK' && !isPublic) {
+        isUnavailable = true;
+      }
+    }
+
+    // 2. Secondary fallback via youtube-transcript with automatic retry
+    if (cues.length === 0 && !isUnavailable) {
+      for (let attempt = 0; attempt < 2 && cues.length === 0; attempt++) {
+        try {
+          if (attempt > 0) {
+            await new Promise((resolve) => setTimeout(resolve, 600));
+          }
+          const items = await YoutubeTranscript.fetchTranscript(videoId);
+          if (items && items.length > 0) {
+            detectedLangCode = (items[0] as any)?.lang || detectedLangCode;
+            cues = items
+              .map((item, idx) => {
+                const rawOffset = item.offset;
+                const rawDuration = item.duration;
+                const start = Math.round((rawOffset > 1000 ? rawOffset / 1000 : rawOffset) * 10) / 10;
+                const duration = Math.round((rawDuration > 1000 ? rawDuration / 1000 : rawDuration) * 10) / 10;
+                return {
+                  id: idx + 1,
+                  start,
+                  end: Math.round((start + Math.max(duration, 1.5)) * 10) / 10,
+                  text: decodeHtmlEntities(item.text.replace(/\n+/g, ' ').trim()),
+                };
+              })
+              .filter((c: SubtitleCue) => c.text.length > 0);
+          }
+        } catch (transcriptError: any) {
+          const msg = String(transcriptError?.message || '');
+          if (msg.includes('TooManyRequest') || msg.includes('429')) {
+            isThrottled = true;
+          }
         }
       }
     }
 
-    // 2. Secondary fallback via watch page HTML captions
-    let videoDetails: any = null;
-    if (cues.length === 0) {
-      const fallbackResult = await fetchCaptionsViaWatchPage(videoId);
+    // 3. Tertiary fallback via watch page HTML captions
+    if (cues.length === 0 && !isUnavailable) {
+      const fallbackResult = await fetchCaptionsViaWatchPage(videoId, extraMeta?.defaultAudioLanguage);
       if (fallbackResult) {
         if (fallbackResult.status && fallbackResult.status !== 'OK') {
-          // If oEmbed confirmed the video is public, a watch-page error is just YouTube
-          // blocking datacenter scraping (e.g. on Vercel IPs), NOT that the video is private.
           if (!isPublic) {
             isUnavailable = true;
           }
@@ -877,13 +1196,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Fetch extra metadata if oEmbed title is missing (such as HTTP 401 embed-restricted videos)
-    let extraMeta: { title?: string; author?: string; description?: string } | null = null;
-    if (!oembedData?.title) {
-      extraMeta = await fetchYouTubeMetadata(videoId);
-    }
-
-    // Video title and metadata resolution: prioritize oEmbed / extraMeta / watch page
+    // Video title and metadata resolution: prioritize oEmbed / extraMeta / videoDetails
     let videoTitle =
       oembedData?.title ||
       extraMeta?.title ||
@@ -914,7 +1227,7 @@ export async function POST(req: NextRequest) {
       return cleaned.length > 0 && !/^\[.*?\]$/.test(cleaned);
     });
 
-    // 3. Tertiary fallback via Whisper AI speech-to-text (for videos without YouTube captions)
+    // 4. Quaternary fallback via Whisper AI speech-to-text (for videos without YouTube captions)
     if (nonNoiseCues.length <= 1) {
       const whisperResult = await transcribeYouTubeAudioViaWhisper(videoId);
       if (whisperResult && whisperResult.cues.length > 0) {
@@ -923,7 +1236,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 4. Quaternary fallback: Intelligent Speech & Dialogue Reconstruction
+    // 5. Intelligent Speech & Dialogue Reconstruction
     // Guarantees that YouTube Shorts, embed-restricted clips, or videos with sparse/disabled CC
     // NEVER fail with empty/poor dialogue (e.g. 1 cue)
     const nonNoiseAfterWhisper = cues.filter((c) => {
@@ -938,13 +1251,14 @@ export async function POST(req: NextRequest) {
         description: videoDetails?.shortDescription || extraMeta?.description,
         author: authorName,
         durationSeconds: Number(videoDetails?.lengthSeconds) || 60,
-        keywords: videoDetails?.keywords,
+        keywords: videoDetails?.keywords || extraMeta?.tags,
+        defaultAudioLanguage: extraMeta?.defaultAudioLanguage,
       });
       cues = synthResult.cues;
       detectedLangCode = synthResult.sourceLanguageCode;
     }
 
-    // 5. Final baseline safeguard: cues is NEVER empty
+    // 6. Final baseline safeguard: cues is NEVER empty
     if (cues.length === 0) {
       cues = [
         { id: 1, start: 0, end: 5, text: videoTitle },
@@ -955,7 +1269,7 @@ export async function POST(req: NextRequest) {
       detectedLangCode = 'en';
     }
 
-    // 6. Accurately detect spoken language and normalize transliterated cues
+    // 7. Accurately detect spoken language and normalize transliterated cues
     const { cues: processedCues, sourceLanguage } = await detectAndNormalizeYouTubeCues({
       videoId,
       videoTitle,
@@ -974,6 +1288,8 @@ export async function POST(req: NextRequest) {
       totalSegments: processedCues.length,
       embedRestricted: isEmbedRestricted,
     });
+
+
   } catch (error) {
     console.error('YouTube subtitle route error:', error);
     const msg = error instanceof Error ? error.message : 'Failed to retrieve YouTube subtitles.';
