@@ -530,6 +530,12 @@ async function fetchCaptionsViaInnerTube(
 
 function parseSupadataContent(rawContent: any): SubtitleCue[] {
   if (!Array.isArray(rawContent) || rawContent.length === 0) return [];
+
+  // Determine if offsets/durations are in milliseconds (Supadata default format)
+  const isMs = rawContent.some(
+    (item) => (item?.duration ?? item?.dur ?? 0) > 60 || (item?.offset ?? item?.start ?? 0) > 1000
+  );
+
   const cues: SubtitleCue[] = [];
 
   for (let idx = 0; idx < rawContent.length; idx++) {
@@ -538,12 +544,11 @@ function parseSupadataContent(rawContent: any): SubtitleCue[] {
     const text = decodeHtmlEntities(String(rawText).replace(/\n+/g, ' ').trim());
     if (!text) continue;
 
-    // Supadata provides offset/start and duration in milliseconds or seconds
-    const rawOffset = item.offset ?? item.start ?? 0;
-    const rawDur = item.duration ?? item.dur ?? 2000;
+    const rawOffset = Number(item.offset ?? item.start ?? 0);
+    const rawDur = Number(item.duration ?? item.dur ?? (isMs ? 2000 : 2));
 
-    const startSec = rawOffset > 1000 ? rawOffset / 1000 : rawOffset;
-    const durSec = rawDur > 1000 ? rawDur / 1000 : rawDur;
+    const startSec = isMs ? rawOffset / 1000 : rawOffset;
+    const durSec = isMs ? rawDur / 1000 : rawDur;
 
     const start = Math.round(startSec * 10) / 10;
     const end = Math.round((startSec + Math.max(durSec, 1.5)) * 10) / 10;
@@ -559,6 +564,12 @@ function parseSupadataContent(rawContent: any): SubtitleCue[] {
   return cues;
 }
 
+interface SupadataResult {
+  cues: SubtitleCue[];
+  langCode: string;
+  diagnostics?: any;
+}
+
 /**
  * Supadata YouTube Transcript Client
  * Cloud transcript extraction for serverless environments (Vercel)
@@ -567,9 +578,15 @@ function parseSupadataContent(rawContent: any): SubtitleCue[] {
 async function fetchTranscriptViaSupadata(
   videoId: string,
   preferredLang?: string
-): Promise<{ cues: SubtitleCue[]; langCode: string } | null> {
+): Promise<SupadataResult | null> {
   const apiKey = process.env.SUPADATA_API_KEY;
-  if (!apiKey || !apiKey.trim()) return null;
+  if (!apiKey || !apiKey.trim()) {
+    return {
+      cues: [],
+      langCode: 'en',
+      diagnostics: { configured: false, reason: 'SUPADATA_API_KEY environment variable is missing on server' },
+    };
+  }
 
   const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
   const langParam = preferredLang ? `&lang=${encodeURIComponent(preferredLang)}` : '';
@@ -585,6 +602,9 @@ async function fetchTranscriptViaSupadata(
       : []),
   ];
 
+  let lastStatus = 0;
+  let lastError = '';
+
   for (const endpoint of endpoints) {
     try {
       const res = await fetch(endpoint, {
@@ -595,6 +615,8 @@ async function fetchTranscriptViaSupadata(
         },
         signal: AbortSignal.timeout(15000),
       });
+
+      lastStatus = res.status;
 
       if (!res.ok) {
         // If status 202 (async generation), poll for completion
@@ -612,7 +634,11 @@ async function fetchTranscriptViaSupadata(
                 const pollData = await pollRes.json();
                 const cues = parseSupadataContent(pollData?.content);
                 if (cues.length > 0) {
-                  return { cues, langCode: pollData?.lang || preferredLang || 'en' };
+                  return {
+                    cues,
+                    langCode: pollData?.lang || preferredLang || 'en',
+                    diagnostics: { configured: true, status: 200, polled: true },
+                  };
                 }
               }
             }
@@ -629,14 +655,20 @@ async function fetchTranscriptViaSupadata(
         return {
           cues,
           langCode: data?.lang || preferredLang || 'en',
+          diagnostics: { configured: true, status: 200, count: cues.length, lang: data?.lang },
         };
       }
-    } catch (err) {
+    } catch (err: any) {
+      lastError = err?.message || String(err);
       console.warn('Supadata API fetch notice:', err);
     }
   }
 
-  return null;
+  return {
+    cues: [],
+    langCode: 'en',
+    diagnostics: { configured: true, status: lastStatus, error: lastError },
+  };
 }
 
 interface WatchPageResult {
@@ -1180,11 +1212,15 @@ export async function POST(req: NextRequest) {
     }
 
     // 2. High-reliability fallback via Supadata API (bypasses datacenter IP blocks on Vercel)
+    let supadataDiag: any = null;
     if (cues.length === 0 && !isUnavailable) {
       const supadataResult = await fetchTranscriptViaSupadata(videoId, extraMeta?.defaultAudioLanguage);
-      if (supadataResult && supadataResult.cues.length > 0) {
-        cues = supadataResult.cues;
-        detectedLangCode = supadataResult.langCode;
+      if (supadataResult) {
+        supadataDiag = supadataResult.diagnostics;
+        if (supadataResult.cues.length > 0) {
+          cues = supadataResult.cues;
+          detectedLangCode = supadataResult.langCode;
+        }
       }
     }
 
@@ -1309,7 +1345,10 @@ export async function POST(req: NextRequest) {
         {
           error:
             'Could not retrieve authentic dialogue or closed captions for this YouTube video. Please ensure the video has audible speech and is publicly accessible, or upload the video file directly.',
-          diagnostics: innerTubeResult?.diagnostics,
+          diagnostics: {
+            innerTube: innerTubeResult?.diagnostics,
+            supadata: supadataDiag,
+          },
         },
         { status: 422 }
       );
