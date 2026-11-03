@@ -528,6 +528,117 @@ async function fetchCaptionsViaInnerTube(
   return { cues: [], langCode: 'en', status: lastStatus, videoDetails: lastVideoDetails, diagnostics };
 }
 
+function parseSupadataContent(rawContent: any): SubtitleCue[] {
+  if (!Array.isArray(rawContent) || rawContent.length === 0) return [];
+  const cues: SubtitleCue[] = [];
+
+  for (let idx = 0; idx < rawContent.length; idx++) {
+    const item = rawContent[idx];
+    const rawText = item.text || item.content || item.line || '';
+    const text = decodeHtmlEntities(String(rawText).replace(/\n+/g, ' ').trim());
+    if (!text) continue;
+
+    // Supadata provides offset/start and duration in milliseconds or seconds
+    const rawOffset = item.offset ?? item.start ?? 0;
+    const rawDur = item.duration ?? item.dur ?? 2000;
+
+    const startSec = rawOffset > 1000 ? rawOffset / 1000 : rawOffset;
+    const durSec = rawDur > 1000 ? rawDur / 1000 : rawDur;
+
+    const start = Math.round(startSec * 10) / 10;
+    const end = Math.round((startSec + Math.max(durSec, 1.5)) * 10) / 10;
+
+    cues.push({
+      id: cues.length + 1,
+      start,
+      end,
+      text,
+    });
+  }
+
+  return cues;
+}
+
+/**
+ * Supadata YouTube Transcript Client
+ * Cloud transcript extraction for serverless environments (Vercel)
+ * where YouTube InnerTube returns LOGIN_REQUIRED on datacenter IPs.
+ */
+async function fetchTranscriptViaSupadata(
+  videoId: string,
+  preferredLang?: string
+): Promise<{ cues: SubtitleCue[]; langCode: string } | null> {
+  const apiKey = process.env.SUPADATA_API_KEY;
+  if (!apiKey || !apiKey.trim()) return null;
+
+  const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+  const langParam = preferredLang ? `&lang=${encodeURIComponent(preferredLang)}` : '';
+  const endpoints = [
+    `https://api.supadata.ai/v1/youtube/transcript?url=${encodeURIComponent(videoUrl)}${langParam}`,
+    `https://api.supadata.ai/v1/transcript?url=${encodeURIComponent(videoUrl)}${langParam}`,
+    // If a preferredLang was requested, also try without lang parameter as a fallback
+    ...(preferredLang
+      ? [
+          `https://api.supadata.ai/v1/youtube/transcript?url=${encodeURIComponent(videoUrl)}`,
+          `https://api.supadata.ai/v1/transcript?url=${encodeURIComponent(videoUrl)}`,
+        ]
+      : []),
+  ];
+
+  for (const endpoint of endpoints) {
+    try {
+      const res = await fetch(endpoint, {
+        method: 'GET',
+        headers: {
+          'x-api-key': apiKey.trim(),
+          'Accept': 'application/json',
+        },
+        signal: AbortSignal.timeout(15000),
+      });
+
+      if (!res.ok) {
+        // If status 202 (async generation), poll for completion
+        if (res.status === 202) {
+          const jobData = await res.json().catch(() => null);
+          const jobId = jobData?.jobId || jobData?.id;
+          if (jobId) {
+            for (let poll = 0; poll < 6; poll++) {
+              await new Promise((r) => setTimeout(r, 1500));
+              const pollRes = await fetch(`https://api.supadata.ai/v1/transcript/${jobId}`, {
+                headers: { 'x-api-key': apiKey.trim() },
+                signal: AbortSignal.timeout(6000),
+              });
+              if (pollRes.status === 200) {
+                const pollData = await pollRes.json();
+                const cues = parseSupadataContent(pollData?.content);
+                if (cues.length > 0) {
+                  return { cues, langCode: pollData?.lang || preferredLang || 'en' };
+                }
+              }
+            }
+          }
+        }
+        continue;
+      }
+
+      const data = await res.json();
+      const rawContent = data?.content || (Array.isArray(data) ? data : []);
+      const cues = parseSupadataContent(rawContent);
+
+      if (cues.length > 0) {
+        return {
+          cues,
+          langCode: data?.lang || preferredLang || 'en',
+        };
+      }
+    } catch (err) {
+      console.warn('Supadata API fetch notice:', err);
+    }
+  }
+
+  return null;
+}
+
 interface WatchPageResult {
   cues: SubtitleCue[];
   langCode: string;
@@ -1068,7 +1179,16 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 2. Secondary fallback via youtube-transcript with automatic retry
+    // 2. High-reliability fallback via Supadata API (bypasses datacenter IP blocks on Vercel)
+    if (cues.length === 0 && !isUnavailable) {
+      const supadataResult = await fetchTranscriptViaSupadata(videoId, extraMeta?.defaultAudioLanguage);
+      if (supadataResult && supadataResult.cues.length > 0) {
+        cues = supadataResult.cues;
+        detectedLangCode = supadataResult.langCode;
+      }
+    }
+
+    // 3. Secondary fallback via youtube-transcript with automatic retry
     if (cues.length === 0 && !isUnavailable) {
       for (let attempt = 0; attempt < 2 && cues.length === 0; attempt++) {
         try {
