@@ -150,21 +150,21 @@ function LoginCard() {
           return;
         }
 
-        if (data.session) {
-          setSuccessMsg('Account created successfully! Redirecting to your workspace...');
-          setTimeout(() => {
-            window.location.href = next;
-          }, 800);
-        } else if (data.user) {
-          setSuccessMsg(
-            'Account created! If confirmation is required, please check your email inbox to verify your account, then sign in.'
-          );
-          setLoadingForm(false);
-        } else {
-          setSuccessMsg('Account created successfully! You can now sign in.');
-          switchMode('signin');
-          setLoadingForm(false);
+        // If Supabase auto-created a session, sign out immediately so the user must manually sign in
+        if (data?.session) {
+          await supabase.auth.signOut();
         }
+
+        // Clear all registration fields
+        setFullName('');
+        setEmail('');
+        setPassword('');
+        setConfirmPassword('');
+
+        // Automatically switch to Sign In view and show success message
+        setMode('signin');
+        setSuccessMsg('Account created successfully! Please sign in with your email and password.');
+        setLoadingForm(false);
       } else {
         // Sign In
         const { error } = await supabase.auth.signInWithPassword({
